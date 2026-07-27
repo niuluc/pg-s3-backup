@@ -3,8 +3,8 @@
 # Container entrypoint.
 #
 #   docker run IMAGE                 -> start supercronic on BACKUP_CRON
-#   docker run IMAGE ob-backup list  -> run an explicit command and exit
-#   docker exec  C  ob-backup list   -> (bypasses this entrypoint entirely)
+#   docker run IMAGE pg-s3-backup list  -> run an explicit command and exit
+#   docker exec  C  pg-s3-backup list   -> (bypasses this entrypoint entirely)
 #
 set -Eeuo pipefail
 
@@ -16,16 +16,16 @@ fi
 : "${BACKUP_CRON:=0 2 * * *}"
 
 # Fail fast with a clear message if required config is missing.
-ob-backup check-env
+pg-s3-backup check-env
 
-cron_file="/tmp/ob-backup.cron"
-printf '%s /usr/local/bin/ob-backup backup\n' "${BACKUP_CRON}" >"${cron_file}"
+cron_file="/tmp/pg-s3-backup.cron"
+printf '%s /usr/local/bin/pg-s3-backup backup\n' "${BACKUP_CRON}" >"${cron_file}"
 
-echo "[entrypoint] ob-backup scheduled: '${BACKUP_CRON}'"
+echo "[entrypoint] pg-s3-backup scheduled: '${BACKUP_CRON}'"
 echo "[entrypoint] target: ${PGUSER}@${PGHOST}:${PGPORT:-5432}/${PGDATABASE} -> s3:${S3_BUCKET}/${S3_PREFIX:-db}"
 
 if [ "${BACKUP_ON_START:-false}" = "true" ]; then
-  ob-backup backup || echo "[entrypoint] initial backup failed (continuing to schedule)"
+  pg-s3-backup backup || echo "[entrypoint] initial backup failed (continuing to schedule)"
 fi
 
 # -no-reap: supercronic's bundled PID-1 reaper mis-execs in this base image, and

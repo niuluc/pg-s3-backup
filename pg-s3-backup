@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ob-backup — Postgres backup / restore CLI.
+# pg-s3-backup — Postgres backup / restore CLI.
 #
 # Connects to Postgres over the network (service DNS on the shared overlay net)
 # and to any S3-compatible object store via rclone. All config is via env vars.
@@ -15,8 +15,9 @@
 # Env (required): PGHOST PGUSER PGPASSWORD PGDATABASE
 #                 S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 # Env (optional): PGPORT=5432 S3_PREFIX=db S3_REGION=us-east-1 S3_PROVIDER=Other
-#                 S3_FORCE_PATH_STYLE=true RETENTION_DAYS=14 WORKDIR=/tmp/ob-backup
-#                 OB_YES=1  (skip the destructive-restore confirmation)
+#                 S3_FORCE_PATH_STYLE=true RETENTION_DAYS=14
+#                 WORKDIR=/tmp/pg-s3-backup
+#                 BACKUP_YES=1  (skip the destructive-restore confirmation)
 #
 set -Eeuo pipefail
 
@@ -26,7 +27,7 @@ die() { printf '[%s] ERROR: %s\n' "$(date -u +%FT%TZ)" "$*" >&2; exit 1; }
 PGPORT="${PGPORT:-5432}"
 S3_PREFIX="${S3_PREFIX:-db}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
-WORKDIR="${WORKDIR:-/tmp/ob-backup}"
+WORKDIR="${WORKDIR:-/tmp/pg-s3-backup}"
 
 require_env() {
   local missing=()
@@ -108,14 +109,14 @@ cmd_restore() {
   [ -n "${name}" ] || die "no backup found to restore"
   tmp="${WORKDIR}/${name}"
 
-  if [ "${OB_YES:-}" != "1" ]; then
+  if [ "${BACKUP_YES:-}" != "1" ]; then
     if [ -t 0 ]; then
       printf 'Restore "%s" into DB "%s" on %s? This OVERWRITES existing data. [y/N] ' \
         "${name}" "${target}" "${PGHOST}"
       read -r ans
       case "${ans}" in y|Y|yes|YES) ;; *) die "aborted" ;; esac
     else
-      die "refusing destructive restore without a TTY; set OB_YES=1 to proceed"
+      die "refusing destructive restore without a TTY; set BACKUP_YES=1 to proceed"
     fi
   fi
 

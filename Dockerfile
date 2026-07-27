@@ -1,4 +1,4 @@
-# ob-backup — Postgres backup / restore sidecar.
+# pg-s3-backup — Postgres backup / restore sidecar.
 #
 # Self-contained image: Postgres client tools + rclone + supercronic.
 # The Postgres client MAJOR version MUST be >= the server it dumps.
@@ -22,9 +22,9 @@ RUN set -eux; \
     chmod +x /usr/local/bin/supercronic; \
     apk del .dl
 
-COPY ob-backup /usr/local/bin/ob-backup
+COPY pg-s3-backup /usr/local/bin/pg-s3-backup
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/ob-backup /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/pg-s3-backup /usr/local/bin/entrypoint.sh
 
 # supercronic execs cron jobs via $SHELL; the base image leaves it unset, which
 # makes the fork/exec fail. Pin it explicitly.

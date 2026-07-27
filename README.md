@@ -1,4 +1,4 @@
-# ob-backup — Postgres backup / restore sidecar
+# pg-s3-backup — Postgres backup / restore sidecar
 
 Self-contained image that dumps a Postgres database **over the network** and
 stores the dump in any S3-compatible bucket via [rclone](https://rclone.org/).
@@ -8,7 +8,7 @@ demand.
 
 ```
 ┌─────────────────┐   pg_dump (network)   ┌──────────┐   rclone   ┌────────┐
-│  ob-backup      │ ────────────────────► │ postgres │            │   S3   │
+│  pg-s3-backup   │ ────────────────────► │ postgres │            │   S3   │
 │  (supercronic)  │                       └──────────┘ ─────────► │ bucket │
 └─────────────────┘   any node                any node            └────────┘
 ```
@@ -21,7 +21,7 @@ container. On a multi-node Docker Swarm — and specifically on
 the **manager** while the database task sits on a **worker**, so it finds
 nothing and silently backs up an empty set.
 
-`ob-backup` connects to Postgres over the overlay network by service DNS. No
+`pg-s3-backup` connects to Postgres over the overlay network by service DNS. No
 docker socket, no node co-location, no placement constraint. Any Swarm +
 Dokploy setup hits that bug; this sidesteps it.
 
@@ -29,11 +29,11 @@ Dokploy setup hits that bug; this sidesteps it.
 
 | Command | Description |
 | --- | --- |
-| `ob-backup backup` | `pg_dump -Fc` → integrity-check → upload to S3 → prune old remote copies. This is what the cron runs. |
-| `ob-backup list` | List backups in the S3 prefix (size / modtime / name). |
-| `ob-backup restore <name\|latest> [target-db]` | Download a backup and `pg_restore --clean --if-exists` it. **Destructive** — see safety note. |
-| `ob-backup verify [<name\|latest>]` | Restore into a throwaway `<db>_verify_<ts>` database, assert it has tables, then drop it. Non-destructive. |
-| `ob-backup check-env` | Validate required env and exit. |
+| `pg-s3-backup backup` | `pg_dump -Fc` → integrity-check → upload to S3 → prune old remote copies. This is what the cron runs. |
+| `pg-s3-backup list` | List backups in the S3 prefix (size / modtime / name). |
+| `pg-s3-backup restore <name\|latest> [target-db]` | Download a backup and `pg_restore --clean --if-exists` it. **Destructive** — see safety note. |
+| `pg-s3-backup verify [<name\|latest>]` | Restore into a throwaway `<db>_verify_<ts>` database, assert it has tables, then drop it. Non-destructive. |
+| `pg-s3-backup check-env` | Validate required env and exit. |
 
 `latest` resolves to the newest backup by name (timestamps sort lexically).
 
@@ -42,7 +42,7 @@ Dokploy setup hits that bug; this sidesteps it.
 `restore` overwrites the target database. It requires confirmation:
 
 - **Interactive** (`docker exec -it …`): prompts `y/N`.
-- **Non-interactive** (no TTY): refuses unless `OB_YES=1` is set.
+- **Non-interactive** (no TTY): refuses unless `BACKUP_YES=1` is set.
 
 `verify` is the safe way to prove a backup is restorable — it never touches the
 live database. A backup you have never restored is not a backup.
@@ -74,8 +74,8 @@ live database. A backup you have never restored is not a backup.
 | `RETENTION_DAYS` | `14` | Delete remote backups older than this after each run. |
 | `BACKUP_CRON` | `0 2 * * *` | supercronic schedule for the scheduled backup. |
 | `BACKUP_ON_START` | `false` | Run one backup immediately on container start. |
-| `WORKDIR` | `/tmp/ob-backup` | Scratch directory for dumps. |
-| `OB_YES` | — | Set `1` to skip the destructive-restore confirmation. |
+| `WORKDIR` | `/tmp/pg-s3-backup` | Scratch directory for dumps. |
+| `BACKUP_YES` | — | Set `1` to skip the destructive-restore confirmation. |
 
 Secrets are passed through the environment only, never on the command line, so
 they don't leak via `ps`. Prefer Docker/Swarm secrets in production.
@@ -99,7 +99,7 @@ docker service create \
   --env S3_SECRET_ACCESS_KEY=**** \
   --env BACKUP_CRON='0 2 * * *' \
   --env RETENTION_DAYS=14 \
-  ghcr.io/niuluc/ob-backup:latest
+  ghcr.io/niuluc/pg-s3-backup:latest
 ```
 
 Or deploy it as a Dokploy application pointing at the same image, with the env
@@ -116,14 +116,14 @@ above and the database's network attached.
 
 ```bash
 c=$(docker ps -q -f name=my-db-backup)
-docker exec -it "$c" ob-backup list
-docker exec -it "$c" ob-backup verify latest          # safe restore proof
-docker exec -it "$c" ob-backup restore latest         # DESTRUCTIVE (prompts)
+docker exec -it "$c" pg-s3-backup list
+docker exec -it "$c" pg-s3-backup verify latest          # safe restore proof
+docker exec -it "$c" pg-s3-backup restore latest         # DESTRUCTIVE (prompts)
 ```
 
 ## Image
 
-Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/ob-backup`
+Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
 (`latest` + `sha-<short>`, plus semver tags on `v*` tags) for `linux/amd64` and
 `linux/arm64` on push to `main`. Pull requests build for validation only.
 
