@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# ob-backup — Postgres backup / restore CLI.
+#
+# Connects to Postgres over the network (service DNS on the shared overlay net)
+# and to any S3-compatible object store via rclone. All config is via env vars.
+#
+# Commands:
+#   backup                 pg_dump -Fc -> upload to S3 -> prune old remote copies
+#   list                   list backups in the S3 prefix (newest last)
+#   restore <name|latest>  download a backup and pg_restore it (DESTRUCTIVE)
+#   verify  [<name|latest>] restore into a throwaway DB, sanity-check, drop it
+#   check-env              validate required env vars and exit
+#
+# Env (required): PGHOST PGUSER PGPASSWORD PGDATABASE
+#                 S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
+# Env (optional): PGPORT=5432 S3_PREFIX=db S3_REGION=us-east-1 S3_PROVIDER=Other
+#                 S3_FORCE_PATH_STYLE=true RETENTION_DAYS=14 WORKDIR=/tmp/ob-backup
+#                 OB_YES=1  (skip the destructive-restore confirmation)
+#
+set -Eeuo pipefail
+
+log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*"; }
+die() { printf '[%s] ERROR: %s\n' "$(date -u +%FT%TZ)" "$*" >&2; exit 1; }
+
+PGPORT="${PGPORT:-5432}"
+S3_PREFIX="${S3_PREFIX:-db}"
+RETENTION_DAYS="${RETENTION_DAYS:-14}"
+WORKDIR="${WORKDIR:-/tmp/ob-backup}"
+
+require_env() {
+  local missing=()
+  local v
+  for v in PGHOST PGUSER PGPASSWORD PGDATABASE \
+           S3_ENDPOINT S3_BUCKET S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY; do
+    [ -n "${!v:-}" ] || missing+=("$v")
+  done
+  [ "${#missing[@]}" -eq 0 ] || die "missing required env: ${missing[*]}"
+}
+
+# Configure Postgres + rclone from env. Secrets go through the environment,
+# never argv (so they don't leak via `ps`).
+init() {
+  require_env
+  export PGPASSWORD
+  export RCLONE_S3_PROVIDER="${S3_PROVIDER:-Other}"
+  export RCLONE_S3_ACCESS_KEY_ID="${S3_ACCESS_KEY_ID}"
+  export RCLONE_S3_SECRET_ACCESS_KEY="${S3_SECRET_ACCESS_KEY}"
+  export RCLONE_S3_ENDPOINT="${S3_ENDPOINT}"
+  export RCLONE_S3_REGION="${S3_REGION:-us-east-1}"
+  export RCLONE_S3_FORCE_PATH_STYLE="${S3_FORCE_PATH_STYLE:-true}"
+  REMOTE=":s3:${S3_BUCKET}/${S3_PREFIX}"
+  mkdir -p "${WORKDIR}"
+  # rclone is configured entirely via RCLONE_S3_* env; point it at an empty
+  # config so it doesn't emit a "config file not found" NOTICE on every call.
+  export RCLONE_CONFIG="${WORKDIR}/rclone.conf"
+  : >"${RCLONE_CONFIG}"
+}
+
+psql_conn() { psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" "$@"; }
+
+resolve_name() {
+  # Echo a concrete backup filename. "latest" (or empty) -> newest by name.
+  # Timestamps are lexically sortable, so `sort | tail -1` == newest.
+  local want="${1:-latest}"
+  if [ "${want}" = "latest" ] || [ -z "${want}" ]; then
+    rclone lsf "${REMOTE}/" --files-only 2>/dev/null | sort | tail -n1
+  else
+    printf '%s\n' "${want}"
+  fi
+}
+
+cmd_backup() {
+  init
+  local ts file tmp
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  file="${PGDATABASE}-${ts}.dump"
+  tmp="${WORKDIR}/${file}"
+
+  log "dumping ${PGDATABASE} from ${PGHOST}:${PGPORT}"
+  pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" \
+    -Fc --no-acl --no-owner -f "${tmp}"
+
+  # Integrity gate: a dump that pg_restore can't read is not a backup.
+  pg_restore --list "${tmp}" >/dev/null || die "dump failed integrity check"
+  log "dump ok ($(du -h "${tmp}" | cut -f1)); uploading to ${S3_BUCKET}/${S3_PREFIX}/"
+
+  rclone copy "${tmp}" "${REMOTE}/" --s3-no-check-bucket --stats-one-line
+  rm -f "${tmp}"
+
+  log "pruning remote backups older than ${RETENTION_DAYS}d"
+  rclone delete "${REMOTE}/" --min-age "${RETENTION_DAYS}d" --s3-no-check-bucket || true
+
+  log "backup complete: ${file}"
+}
+
+cmd_list() {
+  init
+  log "backups in ${S3_BUCKET}/${S3_PREFIX}/ (size / modtime / name):"
+  rclone lsl "${REMOTE}/" 2>/dev/null || die "could not list ${REMOTE}/"
+}
+
+cmd_restore() {
+  init
+  local name target tmp
+  name="$(resolve_name "${1:-latest}")"
+  target="${2:-${PGDATABASE}}"
+  [ -n "${name}" ] || die "no backup found to restore"
+  tmp="${WORKDIR}/${name}"
+
+  if [ "${OB_YES:-}" != "1" ]; then
+    if [ -t 0 ]; then
+      printf 'Restore "%s" into DB "%s" on %s? This OVERWRITES existing data. [y/N] ' \
+        "${name}" "${target}" "${PGHOST}"
+      read -r ans
+      case "${ans}" in y|Y|yes|YES) ;; *) die "aborted" ;; esac
+    else
+      die "refusing destructive restore without a TTY; set OB_YES=1 to proceed"
+    fi
+  fi
+
+  log "downloading ${name}"
+  rclone copy "${REMOTE}/${name}" "${WORKDIR}/" --s3-no-check-bucket
+  [ -f "${tmp}" ] || die "download failed: ${tmp} missing"
+
+  log "restoring into ${target} (drop + recreate objects)"
+  pg_restore -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${target}" \
+    --no-owner --no-acl --clean --if-exists "${tmp}"
+  rm -f "${tmp}"
+  log "restore complete: ${name} -> ${target}"
+}
+
+cmd_verify() {
+  init
+  local name tmp scratch
+  name="$(resolve_name "${1:-latest}")"
+  [ -n "${name}" ] || die "no backup found to verify"
+  tmp="${WORKDIR}/${name}"
+  scratch="${PGDATABASE}_verify_$(date -u +%Y%m%d%H%M%S)"
+
+  log "downloading ${name}"
+  rclone copy "${REMOTE}/${name}" "${WORKDIR}/" --s3-no-check-bucket
+  [ -f "${tmp}" ] || die "download failed: ${tmp} missing"
+
+  # Always drop the scratch DB + temp file, even on failure. Expand the concrete
+  # values into the trap now, so it survives after these locals leave scope.
+  trap "dropdb -h '${PGHOST}' -p '${PGPORT}' -U '${PGUSER}' --if-exists '${scratch}' >/dev/null 2>&1 || true; rm -f '${tmp}'" EXIT
+
+  log "creating throwaway DB ${scratch}"
+  createdb -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" "${scratch}"
+
+  log "restoring ${name} into ${scratch}"
+  pg_restore -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${scratch}" \
+    --no-owner --no-acl "${tmp}"
+
+  local tables
+  tables="$(psql_conn -d "${scratch}" -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")"
+  [ "${tables}" -gt 0 ] || die "verify failed: restored DB has 0 public tables"
+
+  log "verify OK: ${name} restored into ${scratch} with ${tables} public tables"
+}
+
+cmd_check_env() { require_env; log "env OK"; }
+
+main() {
+  local cmd="${1:-help}"; shift || true
+  case "${cmd}" in
+    backup)     cmd_backup "$@" ;;
+    list)       cmd_list "$@" ;;
+    restore)    cmd_restore "$@" ;;
+    verify)     cmd_verify "$@" ;;
+    check-env)  cmd_check_env ;;
+    help|-h|--help)
+      # 2,20 is exactly the header comment block; going further spills code.
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command: ${cmd} (try: backup|list|restore|verify|check-env)" ;;
+  esac
+}
+
+main "$@"
