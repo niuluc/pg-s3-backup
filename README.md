@@ -124,12 +124,25 @@ docker exec -it "$c" pg-s3-backup restore latest         # DESTRUCTIVE (prompts)
 ## Image
 
 Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
-(`latest` + `sha-<short>`, plus semver tags on `v*` tags) for `linux/amd64` and
-`linux/arm64` on push to `main`. Pull requests build for validation only.
+for `linux/amd64` and `linux/arm64` on push to `main`. Pull requests build for
+validation only.
 
-Base image is `postgres:17-alpine` — the `pg_dump`/`pg_restore` major version
-must be `>=` the server it dumps. If your server is newer than 17, bump the base
-in the `Dockerfile` and rebuild.
+The `pg_dump`/`pg_restore` major version must be `>=` the server it dumps. Pick
+the tag that matches your server:
+
+| Server | Tag | Also published |
+| --- | --- | --- |
+| Postgres ≤ 17 | `latest` | `sha-<short>`, and `X.Y.Z` / `X.Y` on `v*` tags |
+| Postgres 18 | `pg18` | `sha-<short>-pg18`, and `X.Y.Z-pg18` / `X.Y-pg18` on `v*` tags |
+
+`latest` stays on the 17 client, so existing sidecars do not change. Point a
+sidecar at `pg18` only when its server runs Postgres 18.
+
+The client major is the `PG_MAJOR` build argument (default `17`):
+
+```bash
+docker build --build-arg PG_MAJOR=18 -t pg-s3-backup:pg18 .
+```
 
 ## License
 
