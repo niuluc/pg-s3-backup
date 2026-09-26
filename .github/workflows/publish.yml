@@ -1,6 +1,10 @@
 name: Publish image
 
 # Pull requests build for validation only; pushes to main publish to GHCR.
+#
+# One image per Postgres client major. 17 is the default and owns the plain
+# tags (latest, sha-<short>, semver). 18 gets the same set with a -pg18
+# suffix, plus a moving `pg18` tag on main.
 
 on:
   push:
@@ -23,8 +27,29 @@ permissions:
 
 jobs:
   publish:
-    name: Build and publish
+    name: Build and publish (pg${{ matrix.pg_major }})
     runs-on: ubuntu-latest
+    strategy:
+      # A failed 18 build must not cancel the 17 (latest) publish.
+      fail-fast: false
+      matrix:
+        include:
+          - pg_major: "17"
+            flavor: latest=auto
+            tags: |
+              type=raw,value=latest,enable={{is_default_branch}}
+              type=sha,prefix=sha-,format=short
+              type=semver,pattern={{version}}
+              type=semver,pattern={{major}}.{{minor}}
+          # latest=false: the 18 build must never claim `latest` (a v* tag
+          # push would otherwise add it via latest=auto).
+          - pg_major: "18"
+            flavor: latest=false
+            tags: |
+              type=raw,value=pg18,enable={{is_default_branch}}
+              type=sha,prefix=sha-,suffix=-pg18,format=short
+              type=semver,pattern={{version}},suffix=-pg18
+              type=semver,pattern={{major}}.{{minor}},suffix=-pg18
     permissions:
       contents: read
       packages: write
@@ -51,22 +76,21 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-,format=short
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+          flavor: ${{ matrix.flavor }}
+          tags: ${{ matrix.tags }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
+          build-args: PG_MAJOR=${{ matrix.pg_major }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Separate cache per major so the two builds don't evict each other.
+          cache-from: type=gha,scope=pg${{ matrix.pg_major }}
+          cache-to: type=gha,mode=max,scope=pg${{ matrix.pg_major }}

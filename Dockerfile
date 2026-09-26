@@ -2,8 +2,10 @@
 #
 # Self-contained image: Postgres client tools + rclone + supercronic.
 # The Postgres client MAJOR version MUST be >= the server it dumps.
-# Pinned to 17; rebuild from a newer base if your server is newer.
-FROM postgres:17-alpine
+# Defaults to 17 (the `latest` image). CI also publishes a PG 18 build
+# (`pg18` tag); build one locally with `--build-arg PG_MAJOR=18`.
+ARG PG_MAJOR=17
+FROM postgres:${PG_MAJOR}-alpine
 
 # https://github.com/aptible/supercronic/releases
 ARG SUPERCRONIC_VERSION=v0.2.33
