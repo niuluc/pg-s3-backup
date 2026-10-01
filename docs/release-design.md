@@ -1,11 +1,60 @@
 # Release design for pg-s3-backup
 
-Status: proposal for discussion. Nothing here is built yet.
+Status: decided 2026-10-01: option d.
 
-The fleet row lists pg-s3-backup as `release: gated` (ADR 0001 in the release
-skill), not onboarded yet. This page checks whether the gated "Create release"
-workflow fits this image, lists the options, and recommends one. The operator
-decides before any release or workflow lands.
+The fleet row listed pg-s3-backup as `release: gated` (ADR 0001 in the release
+skill), not onboarded yet. This page checked whether the gated "Create release"
+workflow fits this image, listed the options, and recommended one. The operator
+picked option d. The sections from "How the image ships today" to
+"Recommendation" are kept as the record of that choice. They describe the
+workflow as it was before step 4.
+
+## Decision
+
+Option d. Releases are plain `v*` tags pushed by hand, and every production
+consumer pins an immutable tag with autoDeploy off. A merge to `main` must not
+reach a production backup.
+
+| Step | What | State |
+|---|---|---|
+| 1 | Pin `offerlink-dev-db-backup` to `sha-05e1e61` and `nonoiseletter-db-backup` to `sha-05e1e61-pg18`, autoDeploy off | Being done in Dokploy on 2026-10-01, checked by digest against what they ran before |
+| 2 | Paperwork: ADR 0001 amendment and the fleet row | Done in the operator's fleet repo |
+| 3 | Release process: tag `vX.Y.Z` by hand, consumers upgrade one app at a time | Written down in README.md, "Releasing this image" |
+| 4 | `publish.yml`: `main` pushes only sha tags, `latest` and `pg18` move only on a release tag | This change (PR #2) |
+
+### Tags per event after step 4
+
+`latest` and `pg18` come from one explicit rule per matrix leg:
+`type=raw,value=latest` (pg17) and `type=raw,value=pg18` (pg18), each with
+`enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}`.
+Both legs set `flavor: latest=false`, so metadata-action never adds `latest`
+by itself. Before, the pg17 leg had `latest=auto`, which adds `latest` on any
+stable semver tag. That is fine for pg17 but would put `latest` on the pg18
+image too, so the pg18 leg always had `latest=false`. Now both legs do the
+same thing.
+
+Example: commit `6e56e2e`, release tag `v0.2.0`. Registry prefix
+`ghcr.io/niuluc/pg-s3-backup:` left out.
+
+| Event | pg17 leg | pg18 leg | Pushed? |
+|---|---|---|---|
+| push to `main` | `sha-6e56e2e` | `sha-6e56e2e-pg18` | yes |
+| push of tag `v0.2.0` | `0.2.0` `0.2` `latest` `sha-6e56e2e` | `0.2.0-pg18` `0.2-pg18` `pg18` `sha-6e56e2e-pg18` | yes |
+| push of tag `v0.2.0-rc.1` | `0.2.0-rc.1` `sha-6e56e2e` | `0.2.0-rc.1-pg18` `sha-6e56e2e-pg18` | yes |
+| pull request to `main` | `sha-6e56e2e` | `sha-6e56e2e-pg18` | no, build only |
+| `workflow_dispatch` on `main` | `sha-6e56e2e` | `sha-6e56e2e-pg18` | yes |
+| `workflow_dispatch` on tag `v0.2.0` | same as the tag push | same as the tag push | yes |
+
+The same table for the old rules differs in three rows. A push to `main` and a
+`workflow_dispatch` on `main` also pushed `latest` and `pg18`. A tag push moved
+`latest` but not `pg18`.
+
+How this was checked: the rows come from running metadata-action's own
+`dist/index.js` (v5.10.0, `c299e40`, what `@v5` points to) locally with
+`GITHUB_*` set for each event. The `enable=` expression was evaluated by hand
+with the same logic, since only GitHub evaluates `${{ }}`. Nothing was pushed.
+The real proof comes after the merge: the digests of `latest` and `pg18` must
+not change when the merge commit lands on `main`.
 
 ## How the image ships today
 
@@ -90,6 +139,8 @@ apps, so the useful gate is on the consumer side: each app pins a tag and
 moves it on purpose.
 
 Suggested order, each step its own yes:
+
+This list is the original proposal. The "Decision" section has the state.
 
 1. [ ] Pin `offerlink-dev-db-backup` and `nonoiseletter-db-backup` to the
    immutable tags that match what they run now, and turn autoDeploy off.
