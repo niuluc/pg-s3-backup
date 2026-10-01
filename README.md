@@ -99,8 +99,11 @@ docker service create \
   --env S3_SECRET_ACCESS_KEY=**** \
   --env BACKUP_CRON='0 2 * * *' \
   --env RETENTION_DAYS=14 \
-  ghcr.io/niuluc/pg-s3-backup:latest
+  ghcr.io/niuluc/pg-s3-backup:sha-05e1e61
 ```
+
+The example pins an immutable tag. For production, see
+[Pin it in production](#pin-it-in-production).
 
 Or deploy it as a Dokploy application pointing at the same image, with the env
 above and the database's network attached.
@@ -124,8 +127,10 @@ docker exec -it "$c" pg-s3-backup restore latest         # DESTRUCTIVE (prompts)
 ## Image
 
 Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
-for `linux/amd64` and `linux/arm64` on push to `main`. Pull requests build for
-validation only.
+for `linux/amd64` and `linux/arm64`. A push to `main` publishes only the
+immutable `sha-<short>` and `sha-<short>-pg18` tags. A release tag `vX.Y.Z`
+publishes the version tags and moves `latest` and `pg18`. Pull requests build
+for validation only. See [Releasing this image](#releasing-this-image).
 
 The `pg_dump`/`pg_restore` major version must be `>=` the server it dumps. Pick
 the tag that matches your server:
@@ -143,6 +148,51 @@ The client major is the `PG_MAJOR` build argument (default `17`):
 ```bash
 docker build --build-arg PG_MAJOR=18 -t pg-s3-backup:pg18 .
 ```
+
+## Releasing this image
+
+`latest` and `pg18` move only when someone pushes a release tag. A merge to
+`main` never moves them.
+
+Cut a release from an up to date `main`:
+
+```bash
+git tag v0.2.0
+git push https://github.com/niuluc/pg-s3-backup.git v0.2.0
+```
+
+The tag push builds both images and publishes:
+
+| Image | Tags |
+| --- | --- |
+| Postgres 17 client | `0.2.0`, `0.2`, `sha-<short>`, and moves `latest` |
+| Postgres 18 client | `0.2.0-pg18`, `0.2-pg18`, `sha-<short>-pg18`, and moves `pg18` |
+
+Use plain `vX.Y.Z` tags. A tag with a pre-release part, like `v0.2.0-rc.1`,
+gets its own tags but does not move `latest` or `pg18`.
+
+### Pin it in production
+
+A production sidecar should run an immutable tag: `X.Y.Z` (or `X.Y.Z-pg18`),
+or `sha-<short>` (or `sha-<short>-pg18`). Keep Dokploy autoDeploy off for it.
+Do not run `latest` or `pg18` in production. They move with every release, so
+a restart can pull new code nobody chose for that app.
+
+Pick the client major from the table in [Image](#image). `pg_dump` must be the
+same major as the server or newer. `latest` is the Postgres 17 client and
+`pg18` is the Postgres 18 client.
+
+### Upgrade a consumer
+
+1. Cut the release, or pick an existing tag.
+2. In Dokploy, change the image tag of one backup app by hand, for example
+   `ghcr.io/niuluc/pg-s3-backup:0.2.0`, and redeploy it.
+3. Wait for its next nightly run. Check that the dump reached S3 and that
+   `pg-s3-backup verify latest` passes in that container. Here `latest`
+   means the newest dump, not the image tag.
+4. Then move the next app. One app at a time.
+
+To roll back, set the app back to the tag it ran before and redeploy.
 
 ## License
 

@@ -4,7 +4,19 @@ name: Publish image
 #
 # One image per Postgres client major. 17 is the default and owns the plain
 # tags (latest, sha-<short>, semver). 18 gets the same set with a -pg18
-# suffix, plus a moving `pg18` tag on main.
+# suffix, and its moving tag is `pg18`.
+#
+# Which tags each event pushes:
+#   push to main        sha-<short>, sha-<short>-pg18. Nothing else.
+#   push of tag vX.Y.Z  X.Y.Z, X.Y, sha-<short> and latest (pg17),
+#                       X.Y.Z-pg18, X.Y-pg18, sha-<short>-pg18 and pg18 (pg18).
+#   pull_request        builds both, pushes nothing.
+#   workflow_dispatch   follows the ref it runs on: on main (or any branch)
+#                       like a main push, sha tags only; on a vX.Y.Z tag
+#                       like that tag push.
+# So `latest` and `pg18` move only when a release tag is pushed by hand.
+# A tag with a pre-release part (v1.2.0-rc.1) gets its own tags but does not
+# move `latest` or `pg18`.
 
 on:
   push:
@@ -34,19 +46,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Both legs use latest=false, so metadata-action never adds
+          # `latest` on its own (latest=auto would add it on every v* semver
+          # tag). The one moving tag per leg is an explicit raw rule, enabled
+          # only on a v* tag ref without a pre-release '-'. That rule is the
+          # only place `latest` and `pg18` come from.
           - pg_major: "17"
-            flavor: latest=auto
+            flavor: latest=false
             tags: |
-              type=raw,value=latest,enable={{is_default_branch}}
+              type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
               type=sha,prefix=sha-,format=short
               type=semver,pattern={{version}}
               type=semver,pattern={{major}}.{{minor}}
-          # latest=false: the 18 build must never claim `latest` (a v* tag
-          # push would otherwise add it via latest=auto).
+          # The 18 build must never claim `latest`: latest=false, and its
+          # raw rule pushes `pg18` instead.
           - pg_major: "18"
             flavor: latest=false
             tags: |
-              type=raw,value=pg18,enable={{is_default_branch}}
+              type=raw,value=pg18,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
               type=sha,prefix=sha-,suffix=-pg18,format=short
               type=semver,pattern={{version}},suffix=-pg18
               type=semver,pattern={{major}}.{{minor}},suffix=-pg18
