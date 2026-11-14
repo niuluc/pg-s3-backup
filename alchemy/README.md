@@ -48,7 +48,21 @@ cd alchemy
 
 `deploy.sh` sets `INFISICAL_API_URL` to the self-hosted instance. The Infisical
 login is an Alchemy profile (`bunx alchemy profile edit --add Infisical`) or
-`INFISICAL_TOKEN`. State lives in `./.alchemy/` on omarchy and is gitignored.
+`INFISICAL_TOKEN`.
+
+State lives outside the repo, in `~/.local/share/alchemy/state` (mode 0700) on
+the deploy machine. `localState()` takes no path in beta.87: it always uses
+`<cwd>/.alchemy/state` (`node_modules/alchemy/src/State/LocalState.ts`,
+`makeLocalState`). So `deploy.sh` makes `.alchemy/state` a symlink to that root,
+and refuses to run if `.alchemy/state` exists and is anything else. The root is
+shared with other stacks. Alchemy files state under `<stack>/<stage>/`, so every
+stack needs its own name. `.alchemy/` is gitignored. Always run through
+`deploy.sh`: a bare `bunx alchemy` on a fresh checkout writes state into the
+worktree.
+
+A changed secret plans as an update of `pg-backup`, not a no-op or replace.
+`Service.ts` `diff` compares the environment after unwrapping `Redacted`
+values. The environment is updated in place.
 
 ## Known limits
 
@@ -74,6 +88,10 @@ login is an Alchemy profile (`bunx alchemy profile edit --add Infisical`) or
   `Docker.Service` create takes it over without `--adopt`
   (`node_modules/@alchemy.run/docker/src/Service.ts`, the `existingByName`
   branch). No such service exists today.
+- **Secrets in plain text in state.** Local state stores `Redacted` values
+  unwrapped (`node_modules/alchemy/src/State/StateEncoding.ts`,
+  `encodeState`). `~/.local/share/alchemy/state` on the deploy machine holds
+  every secret of this stack.
 - **No healthcheck.** The app listens only on the tailnet (tsnet), so a
   container healthcheck cannot reach `/healthz`.
 
@@ -82,5 +100,6 @@ login is an Alchemy profile (`bunx alchemy profile edit --add Infisical`) or
 1. Read secrets from Swarm secrets: add `*_FILE` variants (for example
    `S3_SECRET_ACCESS_KEY_FILE`) to the app. Then mount Swarm secrets
    instead of `environment`, which removes the two secret exposures above.
-2. Serve `/healthz` on `127.0.0.1` inside the container as well. Then add a
+2. Use an encrypted remote state store instead of local state.
+3. Serve `/healthz` on `127.0.0.1` inside the container as well. Then add a
    Swarm healthcheck such as `wget -qO- http://127.0.0.1:<port>/healthz`.
