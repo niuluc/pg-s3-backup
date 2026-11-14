@@ -20,9 +20,11 @@ services:
   app:
     build: .
     depends_on: [ pg16, pg17, pg18, s3 ]
-    ports: [ "0.0.0.0:${PORT:-8091}:8080" ]
+    ports: [ "127.0.0.1:${PORT:-8091}:8080" ]
     environment:
+      # No login: only reachable from this machine (port bound to 127.0.0.1).
       DEV_NO_AUTH: "1"
+      DEV_NO_AUTH_ANY_ADDR: "1"
       LISTEN_ADDR: ":8080"
       S3_ENDPOINT: http://s3:9000
       S3_BUCKET: backups

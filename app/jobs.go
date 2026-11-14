@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -167,6 +168,90 @@ func runCmd(ctx context.Context, t Target, s3 S3Config, logOut func(string), nam
 	return stdout.String(), nil
 }
 
+// replaceStream feeds psql: BEGIN, pre, then pg_restore's SQL, then COMMIT
+// only if pg_restore exited 0. If pg_restore fails or psql stops on an error,
+// psql never sees COMMIT and the server rolls the whole transaction back.
+func (j *job) replaceStream(ctx context.Context, restore, psql []string, pre string) error {
+	env := append(os.Environ(), j.r.s3.env()...)
+	env = append(env, "PGPASSWORD="+j.t.Password, "PGCONNECT_TIMEOUT=10", "PGAPPNAME=pg-backup")
+	ca := exec.CommandContext(ctx, restore[0], restore[1:]...)
+	cb := exec.CommandContext(ctx, psql[0], psql[1:]...)
+	ca.Env, cb.Env = env, env
+	var ea, eb bytes.Buffer
+	ca.Stderr, cb.Stderr = &ea, &eb
+	aOut, err := ca.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	bIn, err := cb.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err := cb.Start(); err != nil {
+		return err
+	}
+	defer func() {
+		for _, e := range []*bytes.Buffer{&ea, &eb} {
+			if e.Len() > 0 {
+				j.r.store.UpdateRun(j.runID, func(rr *Run) { rr.Log += e.String() })
+			}
+		}
+	}()
+	fail := func(err error) error {
+		bIn.Close() // EOF without COMMIT: the server rolls back
+		_ = cb.Wait()
+		return err
+	}
+	if err := ca.Start(); err != nil {
+		return fail(err)
+	}
+	_, werr := io.WriteString(bIn, "BEGIN;\n"+pre)
+	if werr == nil {
+		_, werr = io.Copy(bIn, aOut)
+	}
+	if werr != nil {
+		// psql went away (it stops on the first error). Stop pg_restore too.
+		_ = ca.Process.Kill()
+		_ = ca.Wait()
+		bIn.Close()
+		errB := cb.Wait()
+		return fmt.Errorf("psql: %v %s", errB, lastLine(eb.String()))
+	}
+	if errA := ca.Wait(); errA != nil {
+		return fail(fmt.Errorf("pg_restore: %v %s", errA, lastLine(ea.String())))
+	}
+	if _, err := io.WriteString(bIn, "COMMIT;\n"); err != nil {
+		return fail(fmt.Errorf("psql: %v %s", err, lastLine(eb.String())))
+	}
+	bIn.Close()
+	if errB := cb.Wait(); errB != nil {
+		return fmt.Errorf("psql: %v %s", errB, lastLine(eb.String()))
+	}
+	return nil
+}
+
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndex(s, "\n"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// safeName accepts only plain dump basenames, so an S3 object name can never
+// steer a local path out of WORKDIR.
+func safeName(name string) bool {
+	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".dump") {
+		return false
+	}
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
 // ServerVersion asks the server for server_version_num, e.g. 160004 -> 16, "16.4".
 func (r *Runner) ServerVersion(ctx context.Context, t Target) (int, string, error) {
 	psql, err := r.client(18, "psql") // any recent psql can ask
@@ -299,6 +384,9 @@ func (j *job) fetch(ctx context.Context, file string) (string, error) {
 	if found == nil {
 		return "", fmt.Errorf("%s is not a backup of %s", file, j.t.Name)
 	}
+	if !safeName(file) {
+		return "", fmt.Errorf("refusing unsafe file name %q", file)
+	}
 	tmp := filepath.Join(j.r.workdir, j.t.ID+"-restore-"+file)
 	j.logf("downloading %s (%s)", file, humanBytes(found.Size))
 	if _, err := j.exec(ctx, "rclone", "copyto", j.r.s3.remote(j.t.Prefix)+"/"+file, tmp, "--s3-no-check-bucket"); err != nil {
@@ -343,9 +431,10 @@ func (j *job) restoreCopy(file string) error {
 	return nil
 }
 
-// restoreReplace overwrites the live database with a dump. It first takes a
-// fresh backup, so the step can be undone, then restores in one transaction:
-// either every object is replaced or nothing changes.
+// restoreReplace makes the live database equal to a dump. It first takes a
+// fresh backup, so the step can be undone. Then, in one psql transaction, it
+// drops every user schema (so objects created after the dump go too) and
+// replays the dump. Either all of it applies or nothing changes.
 func (j *job) restoreReplace(file string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Hour)
 	defer cancel()
@@ -366,15 +455,39 @@ func (j *job) restoreReplace(file string) error {
 	if err != nil {
 		return err
 	}
+	psql, _ := j.r.client(major, "psql")
 	tmp, err := j.fetch(ctx, file)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp)
 
-	j.logf("step 2/2: replacing %s with %s (single transaction)", j.t.Database, file)
-	args := append([]string{"--no-owner", "--no-acl", "--clean", "--if-exists", "--single-transaction", "--exit-on-error"}, j.connArgs(j.t.Database)...)
-	if _, err := j.exec(ctx, pgRestore, append(args, tmp)...); err != nil {
+	// Every user schema in the live database.
+	out, err := j.exec(ctx, psql, append([]string{"-X", "-A", "-t", "-c",
+		`SELECT quote_ident(nspname) FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema' ORDER BY 1`},
+		j.connArgs(j.t.Database)...)...)
+	if err != nil {
+		return err
+	}
+	var pre strings.Builder
+	for _, s := range strings.Fields(out) {
+		fmt.Fprintf(&pre, "DROP SCHEMA %s CASCADE;\n", s)
+	}
+	// pg_dump does not emit CREATE SCHEMA public unless public was recreated
+	// in the source; recreate it only when the archive will not.
+	toc, err := j.exec(ctx, pgRestore, "--list", tmp)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(toc, " SCHEMA - public ") {
+		pre.WriteString("CREATE SCHEMA public;\n")
+	}
+	j.logf("step 2/2: replacing %s with %s in one transaction (drop schemas: %s)", j.t.Database, file, strings.Join(strings.Fields(out), ", "))
+	if err := j.replaceStream(ctx,
+		[]string{pgRestore, "--no-owner", "--no-acl", "-f", "-", tmp},
+		append([]string{psql, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "-"}, j.connArgs(j.t.Database)...),
+		pre.String(),
+	); err != nil {
 		return fmt.Errorf("%w (rolled back, live database unchanged; safety backup %s)", err, safety)
 	}
 	j.logf("done. To undo, replace again with %s", safety)
@@ -467,6 +580,13 @@ func (r *Runner) List(ctx context.Context, t Target) ([]RemoteFile, error) {
 	if err := json.Unmarshal([]byte(out), &files); err != nil {
 		return nil, err
 	}
+	kept := files[:0]
+	for _, f := range files {
+		if safeName(f.Name) {
+			kept = append(kept, f)
+		}
+	}
+	files = kept
 	sort.Slice(files, func(i, j int) bool { return files[i].Name > files[j].Name })
 	return files, nil
 }

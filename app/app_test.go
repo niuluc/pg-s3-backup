@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -158,5 +159,73 @@ func TestPagesRender(t *testing.T) {
 		if pages[name] == nil {
 			t.Errorf("page %s not loaded", name)
 		}
+	}
+}
+
+func TestSafeName(t *testing.T) {
+	for _, n := range []string{"shop-20261114T090601Z.dump", "board_app_native-20261028T033000Z.dump"} {
+		if !safeName(n) {
+			t.Errorf("%q rejected", n)
+		}
+	}
+	for _, n := range []string{"", "../x.dump", "a/b.dump", ".dump", "x.sql", "a b.dump", "x.dump/..", `a\b.dump`} {
+		if safeName(n) {
+			t.Errorf("%q accepted", n)
+		}
+	}
+}
+
+func TestUniqueFiles(t *testing.T) {
+	all := []Target{{ID: "1", Name: "a", Prefix: "db", Database: "app"}}
+	if uniqueFiles(Target{ID: "2", Prefix: "db", Database: "app"}, all) == nil {
+		t.Error("same folder and database accepted")
+	}
+	if uniqueFiles(Target{ID: "1", Prefix: "db", Database: "app"}, all) != nil {
+		t.Error("editing the same target refused")
+	}
+	if uniqueFiles(Target{ID: "2", Prefix: "other", Database: "app"}, all) != nil {
+		t.Error("different folder refused")
+	}
+}
+
+func TestLoopback(t *testing.T) {
+	for addr, want := range map[string]bool{"127.0.0.1:8080": true, "[::1]:80": true, "localhost:1": true, ":8080": false, "0.0.0.0:8080": false, "10.0.0.5:80": false} {
+		if loopback(addr) != want {
+			t.Errorf("loopback(%q) = %v", addr, !want)
+		}
+	}
+}
+
+// replaceStream must send COMMIT only when pg_restore succeeds.
+func TestReplaceStreamCommitGate(t *testing.T) {
+	dir := t.TempDir()
+	got := filepath.Join(dir, "psql-input.sql")
+	fakePsql := filepath.Join(dir, "psql")
+	_ = os.WriteFile(fakePsql, []byte("#!/bin/sh\ncat > "+got+"\n"), 0o755)
+	okRestore := filepath.Join(dir, "restore-ok")
+	_ = os.WriteFile(okRestore, []byte("#!/bin/sh\necho 'CREATE TABLE t();'\n"), 0o755)
+	badRestore := filepath.Join(dir, "restore-bad")
+	_ = os.WriteFile(badRestore, []byte("#!/bin/sh\necho 'CREATE TABLE t();'\necho broken >&2\nexit 1\n"), 0o755)
+
+	s, _ := OpenStore(dir)
+	r := &Runner{store: s}
+	run := &Run{ID: "r1"}
+	s.AddRun(run)
+	j := &job{r: r, runID: "r1"}
+
+	if err := j.replaceStream(context.Background(), []string{okRestore}, []string{fakePsql}, "DROP SCHEMA public CASCADE;\n"); err != nil {
+		t.Fatalf("ok case: %v", err)
+	}
+	b, _ := os.ReadFile(got)
+	if want := "BEGIN;\nDROP SCHEMA public CASCADE;\nCREATE TABLE t();\nCOMMIT;\n"; string(b) != want {
+		t.Errorf("ok case sent %q, want %q", b, want)
+	}
+
+	if err := j.replaceStream(context.Background(), []string{badRestore}, []string{fakePsql}, "DROP SCHEMA public CASCADE;\n"); err == nil {
+		t.Fatal("bad case: expected an error")
+	}
+	b, _ = os.ReadFile(got)
+	if strings.Contains(string(b), "COMMIT") {
+		t.Errorf("bad case sent COMMIT: %q", b)
 	}
 }

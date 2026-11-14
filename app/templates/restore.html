@@ -20,7 +20,7 @@
   <h2>Replace the live database</h2>
   <ol class="small">
     <li>Takes a fresh backup of the live database first, so you can undo this.</li>
-    <li>Drops and recreates every object from the backup in one transaction. If anything fails, nothing changes.</li>
+    <li>In one transaction, drops every schema of the live database, including tables added after this backup, and replays the backup. If anything fails, nothing changes.</li>
   </ol>
   <p class="small">Writes made after <b>{{ts $f.ModTime}}</b> are lost. Stop the app first if it writes a lot. Type <b class="mono">{{$t.Database}}</b> to confirm.</p>
   <input name="confirm" autocomplete="off" class="mono"> <button class="btn bad">Replace live database</button>

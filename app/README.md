@@ -21,16 +21,19 @@ browser ──(tailnet only)──► pg-backup ──► Postgres 16 / 17 / 18,
   uses the nearest newer one.
 - **Backup.** `pg_dump -Fc`, then `pg_restore --list` as an integrity
   check, then upload. Pruning deletes only that database's own
-  `<database>-*.dump` files older than its retention.
+  `<database>-*.dump` files older than its retention. Two databases cannot
+  share the same S3 folder and database name.
 - **Verify.** Restores the newest dump into `<database>_verify_<time>`,
   counts its tables, then drops it.
 - **Restore as copy.** Restores a chosen dump into a new database
   `<database>_restore_<time>`. The live database stays as it is. The
   copy stays until you drop it.
 - **Replace live.** You must type the database name. The service takes a
-  fresh backup first. Then it runs `pg_restore --clean --if-exists
-  --single-transaction`, so a failure changes nothing. The run page names
-  the safety backup to undo with.
+  fresh backup first. Then, in one transaction, it drops every user schema
+  and replays the dump. Objects created after the dump go too. The
+  transaction commits only if `pg_restore` and every statement succeed, so
+  a failure changes nothing. The run page names the safety backup to undo
+  with.
 - **Jobs.** One job per database at a time and at most `MAX_PARALLEL` jobs
   in total. Each run keeps its log. Each database keeps its last 30 runs.
 - **Failures.** Each failure is written to the container log as
@@ -73,7 +76,7 @@ login URL. Open it once. The node state then persists in
 | `DISCORD_WEBHOOK_URL` | — | Post failed jobs |
 | `MAX_PARALLEL` | `2` | Jobs that may run at the same time |
 | `DATA_DIR` / `WORKDIR` | `/data` / `/tmp/pg-backup` | State and temp dumps |
-| `DEV_NO_AUTH` | — | `1` serves plain HTTP on `LISTEN_ADDR` with no login. Local dev only. |
+| `DEV_NO_AUTH` | — | `1` serves plain HTTP on `LISTEN_ADDR` with no login. Local dev only. `LISTEN_ADDR` must be loopback unless `DEV_NO_AUTH_ANY_ADDR=1` (for a container whose port is published on 127.0.0.1). |
 
 The Postgres role needs `CREATEDB` for verify and restore as copy.
 

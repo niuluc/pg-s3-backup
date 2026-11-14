@@ -69,6 +69,7 @@ done
 ok "backup shop/blog/stats with postgresql16/17/18"
 res="$(wait_run "$(post "/targets/${ID[gone]}/backup" | run_id)")"
 [ "${res%%|*}" = failed ] || fail "backup of unreachable host: $res"
+for _ in 1 2 3 4 5; do curl -fs "$B/" | grep -q '1 failing' && break; sleep 1; done
 curl -fs "$B/" | grep -q '1 failing' || fail "dashboard does not show the failure"
 ok "unreachable target fails and shows on the dashboard"
 
@@ -96,18 +97,33 @@ grep -q 'err=' <<<"$redir" || fail "replace without confirm was not refused: $re
 before="$(state | python3 -c "import json,sys; print(sum(1 for r in json.load(sys.stdin)['runs'] if r['kind']=='restore-replace'))")"
 [ "$before" = 0 ] || fail "refused replace still started a run"
 ok "replace refused without typed confirmation"
+psql_in pg16 shop shop "create table added_after_backup(x int)" >/dev/null
 res="$(wait_run "$(post "/targets/${ID[shop]}/restore" -d mode=replace --data-urlencode "file=$file" -d confirm=shop | run_id)")"
 [ "${res%%|*}" = ok ] || fail "restore replace: $res"
 [ "$(psql_in pg16 shop shop "select count(*) from orders")" = 40000 ] || fail "live not restored"
+[ "$(psql_in pg16 shop shop "select to_regclass('public.added_after_backup') is null")" = t ] || fail "table created after the backup survived replace"
 safety="${res##*undo with }"
 docker compose exec -T s3 test -f "/data/backups/shop/$safety" || fail "safety backup $safety not in S3"
-ok "replace live: 30000 -> 40000 orders, safety backup $safety stored"
+ok "replace live: 30000 -> 40000 orders, newer table dropped, safety backup $safety stored"
 
 # 6. Undo with the safety backup.
 res="$(wait_run "$(post "/targets/${ID[shop]}/restore" -d mode=replace --data-urlencode "file=$safety" -d confirm=shop | run_id)")"
 [ "${res%%|*}" = ok ] || fail "undo: $res"
 [ "$(psql_in pg16 shop shop "select count(*) from orders")" = 30000 ] || fail "undo did not bring back 30000 orders"
 ok "undo with the safety backup: back to 30000 orders"
+
+# 6b. Replace on Postgres 18 too (newest client and server).
+sfile="$(state | python3 -c "import json,sys; print([r['file'] for r in json.load(sys.stdin)['runs'] if r['kind']=='backup' and r['status']=='ok' and r['file'].startswith('stats-')][0])")"
+psql_in pg18 stats stats "truncate orders" >/dev/null
+res="$(wait_run "$(post "/targets/${ID[stats]}/restore" -d mode=replace --data-urlencode "file=$sfile" -d confirm=stats | run_id)")"
+[ "${res%%|*}" = ok ] || fail "pg18 replace: $res"
+[ "$(psql_in pg18 stats stats "select count(*) from orders")" = 40000 ] || fail "pg18 live not restored"
+ok "replace live on Postgres 18"
+
+# 6c. A second target writing the same folder and database is refused.
+redir="$(post /targets -d name=dupe -d host=pg16 -d port=5432 -d database=shop -d user=shop -d password=shop-pw --data-urlencode "schedule=0 3 * * *" -d retention=14 -d prefix=shop)"
+grep -q 'err=' <<<"$redir" || fail "duplicate folder accepted: $redir"
+ok "duplicate S3 folder + database refused"
 
 # 7. Restore of a file that is not this target's backup is refused.
 res="$(wait_run "$(post "/targets/${ID[shop]}/restore" -d mode=copy --data-urlencode "file=../blog/x.dump" | run_id)")"

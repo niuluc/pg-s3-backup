@@ -142,6 +142,9 @@ func main() {
 		log.Printf("serving on tailnet as %s (%s)", ts.Hostname, app.mode)
 	} else {
 		addr := env("LISTEN_ADDR", "127.0.0.1:8080")
+		if !loopback(addr) && os.Getenv("DEV_NO_AUTH_ANY_ADDR") != "1" {
+			log.Fatalf("DEV_NO_AUTH serves without login, so LISTEN_ADDR must be loopback (got %q). In a container, publish the port on 127.0.0.1 and set DEV_NO_AUTH_ANY_ADDR=1.", addr)
+		}
 		ln, err = net.Listen("tcp", addr)
 		if err != nil {
 			log.Fatal(err)
@@ -362,6 +365,10 @@ func (a *App) saveTarget(w http.ResponseWriter, r *http.Request) {
 		back(w, r, formURL, "err", err.Error())
 		return
 	}
+	if err := uniqueFiles(t, a.store.Targets()); err != nil {
+		back(w, r, formURL, "err", err.Error())
+		return
+	}
 	saved, err := a.store.PutTarget(t)
 	if err != nil {
 		back(w, r, formURL, "err", err.Error())
@@ -379,6 +386,29 @@ func (a *App) saveTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	a.store.SetDetected(saved.ID, ver)
 	back(w, r, "/targets/"+saved.ID, "msg", "Saved. Connected to Postgres "+ver+".")
+}
+
+// uniqueFiles refuses two targets that would write the same
+// <folder>/<database>-*.dump files, because each prunes that pattern.
+func uniqueFiles(t Target, all []Target) error {
+	for _, o := range all {
+		if o.ID != t.ID && o.Prefix == t.Prefix && o.Database == t.Database {
+			return fmt.Errorf("%s already writes %s/%s-*.dump; pick another S3 folder", o.Name, o.Prefix, o.Database)
+		}
+	}
+	return nil
+}
+
+func loopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validate(t Target) error {
