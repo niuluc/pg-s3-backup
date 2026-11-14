@@ -12,12 +12,18 @@ import * as Alchemy from "alchemy";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 
+// Image tag of ghcr.io/niuluc/pg-backup. A version bump is a commit here.
+// Published by app.yml when the tag app-v<VERSION> is pushed.
+const PG_BACKUP_VERSION = "0.1.0";
+const IMAGE = `ghcr.io/niuluc/pg-backup:${PG_BACKUP_VERSION}`;
+
 export default Alchemy.Stack(
   "pg-backup",
   {
     providers: Docker.providers(),
     state: Alchemy.localState(),
     // INFISICAL_API_URL points at the self-hosted instance (set by deploy.sh).
+    // Infisical holds the secrets plus S3_ENDPOINT, S3_BUCKET, ALLOWED_USERS.
     secrets: [Infisical.Secrets({ project: "pg-backup", environment: "prod" })],
   },
   Effect.gen(function* () {
@@ -46,12 +52,10 @@ export default Alchemy.Stack(
       name: "pg-backup-data",
     }).pipe(Alchemy.RemovalPolicy.protect());
 
-    const version = yield* Config.String("PG_BACKUP_VERSION");
-
     const service = yield* Docker.Service("pg-backup", {
       context: manager,
       name: "pg-backup",
-      image: `ghcr.io/niuluc/pg-backup:${version}`,
+      image: IMAGE,
       replicas: 1,
       placement: { constraints: ["node.labels.tier==prod"] },
       networks: ["dokploy-network"],
@@ -76,6 +80,6 @@ export default Alchemy.Stack(
       labels: { "managed-by": "alchemy", stack: "pg-backup" },
     });
 
-    return { service: service.name, volume: data.name, image: `ghcr.io/niuluc/pg-backup:${version}` };
+    return { service: service.name, volume: data.name, image: IMAGE };
   }),
 );
