@@ -1,0 +1,28 @@
+{{define "body"}}{{$d := .Data}}{{$t := $d.T}}{{$f := $d.F}}
+<div class="head"><h1>Restore · <a href="/targets/{{$t.ID}}">{{$t.Name}}</a></h1></div>
+<dl class="facts">
+  <dt>Backup</dt><dd class="mono">{{$f.Name}} · {{bytes $f.Size}} · stored {{ago $f.ModTime}}</dd>
+  <dt>Live database</dt><dd class="mono">{{$t.User}}@{{$t.Host}}:{{$t.Port}}/{{$t.Database}}</dd>
+</dl>
+
+<form class="choice" method="post" action="/targets/{{$t.ID}}/restore">
+  <input type="hidden" name="file" value="{{$f.Name}}">
+  <input type="hidden" name="mode" value="copy">
+  <h2>Restore as a copy</h2>
+  <p>Creates a new database <span class="mono">{{$t.Database}}_restore_&lt;time&gt;</span> on the same server and restores this backup into it.
+     The live database is not touched. Inspect the copy, copy rows back, or point the app at it. Drop it when done.</p>
+  <button class="btn primary">Restore as copy</button>
+</form>
+
+<form class="choice danger" method="post" action="/targets/{{$t.ID}}/restore">
+  <input type="hidden" name="file" value="{{$f.Name}}">
+  <input type="hidden" name="mode" value="replace">
+  <h2>Replace the live database</h2>
+  <ol class="small">
+    <li>Takes a fresh backup of the live database first, so you can undo this.</li>
+    <li>In one transaction, drops every schema of the live database, including tables added after this backup, and replays the backup. If anything fails, nothing changes.</li>
+  </ol>
+  <p class="small">Writes made after <b>{{ts $f.ModTime}}</b> are lost. Stop the app first if it writes a lot. Type <b class="mono">{{$t.Database}}</b> to confirm.</p>
+  <input name="confirm" autocomplete="off" class="mono"> <button class="btn bad">Replace live database</button>
+</form>
+{{end}}

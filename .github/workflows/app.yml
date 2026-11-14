@@ -1,0 +1,82 @@
+name: pg-backup app
+
+# The multi-database backup service in app/. Separate image from the
+# sidecar: ghcr.io/<owner>/pg-backup.
+#
+#   pull_request        go vet, go test, e2e against Postgres 16/17/18; builds, pushes nothing
+#   push to main        same checks, then pushes sha-<short>
+#   push of tag app-vX.Y.Z  pushes X.Y.Z
+#   workflow_dispatch   like a push on the ref it runs on
+# No moving tag: the Dokploy app pins an exact tag.
+
+on:
+  push:
+    branches: [main]
+    tags: ["app-v*"]
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/app.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test ./...
+      - name: End-to-end (Postgres 16/17/18, S3 stand-in)
+        run: test/e2e.sh
+
+  publish:
+    needs: test
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/pg-backup
+          flavor: latest=false
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=match,pattern=app-v(.*),group=1
+      - uses: docker/build-push-action@v6
+        with:
+          context: app
+          platforms: linux/amd64
+          push: true
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            ${{ steps.meta.outputs.labels }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app

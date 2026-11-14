@@ -1,0 +1,15 @@
+{{define "body"}}{{$d := .Data}}{{$r := $d.Run}}
+<div class="head">
+  <h1><i class="dot {{if eq $r.Status "ok"}}ok{{else if eq $r.Status "running"}}running{{else}}failed{{end}}"></i>
+    {{$r.Kind}} · <a href="/targets/{{$d.T.ID}}">{{$d.T.Name}}</a></h1>
+</div>
+<dl class="facts">
+  <dt>Status</dt><dd>{{$r.Status}}{{if $r.Message}} · {{$r.Message}}{{end}}</dd>
+  <dt>Started</dt><dd>{{ts $r.Started}} by {{$r.Trigger}}</dd>
+  {{if $r.Finished}}<dt>Took</dt><dd>{{dur $r.Started $r.Finished}}</dd>{{end}}
+  {{if $r.ServerVersion}}<dt>Postgres</dt><dd>{{$r.ServerVersion}}{{if $r.Client}}, client {{$r.Client}}{{end}}</dd>{{end}}
+  {{if $r.File}}<dt>File</dt><dd class="mono">{{$r.File}}{{if $r.Size}} · {{bytes $r.Size}}{{end}}</dd>{{end}}
+</dl>
+<pre class="log">{{$r.Log}}</pre>
+{{if eq $r.Status "running"}}<p class="muted small">This page refreshes every 3 seconds.</p>{{end}}
+{{end}}

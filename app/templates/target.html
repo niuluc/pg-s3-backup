@@ -1,0 +1,50 @@
+{{define "body"}}{{$d := .Data}}{{$t := $d.T}}
+<div class="head">
+  <h1><i class="dot {{$d.Row.Health}}"></i> {{$t.Name}}</h1>
+  <span class="spacer"></span>
+  {{if $d.Running}}<span class="muted">job running…</span>{{else}}
+  <form method="post" action="/targets/{{$t.ID}}/backup"><button class="btn primary">Back up now</button></form>
+  <form method="post" action="/targets/{{$t.ID}}/verify"><button class="btn">Verify latest</button></form>
+  <form method="post" action="/targets/{{$t.ID}}/test"><button class="btn quiet">Test connection</button></form>
+  {{end}}
+  <a class="btn quiet" href="/targets/{{$t.ID}}/edit">Edit</a>
+</div>
+
+<dl class="facts">
+  <dt>Database</dt><dd class="mono">{{$t.User}}@{{$t.Host}}:{{$t.Port}}/{{$t.Database}}</dd>
+  <dt>Postgres</dt><dd>{{if $t.ServerVersion}}{{$t.ServerVersion}} <span class="muted small">checked {{ago $t.DetectedAt}}</span>{{else}}<span class="muted">not detected yet</span>{{end}}</dd>
+  <dt>Schedule</dt><dd><span class="mono">{{$t.Schedule}}</span> UTC · {{if $d.Row.HasNext}}next {{until $d.Row.Next}} ({{ts $d.Row.Next}}){{else}}paused{{end}}</dd>
+  <dt>Keeps</dt><dd>{{$t.RetentionDays}} days</dd>
+  <dt>Stored in</dt><dd class="mono">{{$d.Remote}}/</dd>
+</dl>
+
+<h2>Backups in S3</h2>
+{{if $d.ListErr}}<p class="flash err">Could not list S3: {{$d.ListErr}}</p>
+{{else if not $d.Files}}<p class="empty">No backups yet.</p>
+{{else}}
+<table class="list">
+<thead><tr><th>File</th><th>Size</th><th>Stored</th><th></th></tr></thead>
+<tbody>{{range $i, $f := $d.Files}}
+<tr><td class="mono small">{{$f.Name}}{{if eq $i 0}} <span class="tag">latest</span>{{end}}</td><td>{{bytes $f.Size}}</td><td>{{ago $f.ModTime}}</td><td class="actions"><a class="btn quiet" href="/targets/{{$t.ID}}/restore?file={{$f.Name}}">Restore…</a></td></tr>
+{{end}}</tbody>
+</table>
+{{end}}
+
+<h2>History</h2>
+{{if not $d.Runs}}<p class="empty">Nothing has run yet.</p>{{else}}
+<table class="list">
+<thead><tr><th></th><th>Job</th><th>Started</th><th>Took</th><th>By</th><th>Postgres / client</th><th>Result</th></tr></thead>
+<tbody>{{range $d.Runs}}
+<tr>
+  <td><i class="dot {{if eq .Status "ok"}}ok{{else if eq .Status "running"}}running{{else}}failed{{end}}"></i></td>
+  <td><a href="/runs/{{.ID}}">{{.Kind}}</a></td>
+  <td>{{ago .Started}}</td>
+  <td class="small">{{dur .Started .Finished}}</td>
+  <td class="small">{{.Trigger}}</td>
+  <td class="small">{{.ServerVersion}}{{if .Client}} / {{.Client}}{{end}}</td>
+  <td class="small clip" title="{{.Message}}">{{if .Message}}{{.Message}}{{else if .Size}}{{bytes .Size}}{{end}}</td>
+</tr>
+{{end}}</tbody>
+</table>
+{{end}}
+{{end}}
