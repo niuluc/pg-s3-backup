@@ -34,7 +34,8 @@ Every other value comes from Infisical (project `pg-backup`, environment
 | Name | Kind |
 |---|---|
 | `ALLOWED_USERS`, `S3_ENDPOINT`, `S3_BUCKET` | string |
-| `TS_AUTHKEY`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `DISCORD_WEBHOOK_URL` | redacted |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `DISCORD_WEBHOOK_URL` | redacted |
+| `TS_AUTHKEY` | redacted, optional. Needed only for the first start. Remove it from Infisical afterwards; the next deploy drops the env var. |
 
 ## Run
 
@@ -46,9 +47,23 @@ cd alchemy
 ./deploy.sh deploy   # apply
 ```
 
-`deploy.sh` sets `INFISICAL_API_URL` to the self-hosted instance. The Infisical
-login is an Alchemy profile (`bunx alchemy profile edit --add Infisical`) or
-`INFISICAL_TOKEN`.
+Infisical must be the self-hosted instance, `https://secrets.kubaszwajka.com`.
+How the URL is chosen depends on the login:
+
+- Env auth (`INFISICAL_TOKEN` or `INFISICAL_IDENTITY_ID`) wins over a stored
+  profile and uses `INFISICAL_API_URL`. `deploy.sh` sets it to the
+  self-hosted instance when unset.
+- A stored profile (`bunx alchemy profile edit --add Infisical`, machine
+  identity) uses its own `apiBaseUrl` and ignores `INFISICAL_API_URL`. Without
+  `apiBaseUrl` it uses Infisical Cloud. Store
+  `https://secrets.kubaszwajka.com` as `apiBaseUrl` in the profile.
+  Source: `node_modules/@alchemy.run/infisical/src/AuthProvider.ts`,
+  `readEnvironment` versus the stored-profile path.
+
+`deploy.sh` checks this before it runs Alchemy and refuses on a mismatch. For
+env auth it checks `INFISICAL_API_URL`. Otherwise it reads only `apiBaseUrl` from
+`~/.alchemy/profiles/<ALCHEMY_PROFILE or default>/infisical.json`. If a
+future Alchemy changes that file's layout, the check fails closed.
 
 State lives outside the repo, in `~/.local/share/alchemy/state` (mode 0700) on
 the deploy machine. `localState()` takes no path in beta.87: it always uses

@@ -11,6 +11,7 @@ import * as Docker from "@alchemy.run/docker";
 import * as Alchemy from "alchemy";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 // Image tag of ghcr.io/niuluc/pg-backup. A version bump is a commit here.
 // Published by app.yml when the tag app-v<VERSION> is pushed.
@@ -52,6 +53,11 @@ export default Alchemy.Stack(
       name: "pg-backup-data",
     }).pipe(Alchemy.RemovalPolicy.protect());
 
+    // Needed only on the first start; tsnet keeps its node key on the volume
+    // afterwards, and the key is then removed from Infisical. Removing it
+    // drops the env var on the next deploy (a stop-first rolling update).
+    const tsAuthKey = yield* Config.option(Config.Redacted("TS_AUTHKEY"));
+
     const service = yield* Docker.Service("pg-backup", {
       context: manager,
       name: "pg-backup",
@@ -64,12 +70,12 @@ export default Alchemy.Stack(
         DATA_DIR: "/data",
         TS_HOSTNAME: "pg-backup",
         ALLOWED_USERS: yield* Config.String("ALLOWED_USERS"),
-        TS_AUTHKEY: yield* Config.Redacted("TS_AUTHKEY"),
         S3_ENDPOINT: yield* Config.String("S3_ENDPOINT"),
         S3_BUCKET: yield* Config.String("S3_BUCKET"),
         S3_ACCESS_KEY_ID: yield* Config.Redacted("S3_ACCESS_KEY_ID"),
         S3_SECRET_ACCESS_KEY: yield* Config.Redacted("S3_SECRET_ACCESS_KEY"),
         DISCORD_WEBHOOK_URL: yield* Config.Redacted("DISCORD_WEBHOOK_URL"),
+        ...(Option.isSome(tsAuthKey) ? { TS_AUTHKEY: tsAuthKey.value } : {}),
       },
       // Never two tasks at once: they would share one tsnet identity and one
       // state.json. Stop the old task first, roll back if the new one fails.
