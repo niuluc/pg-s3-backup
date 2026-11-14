@@ -1,0 +1,89 @@
+# pg-backup
+
+One service that backs up many Postgres databases to one S3 bucket. You
+manage it in a small web page that only your Tailscale login can open.
+It replaces one `pg-s3-backup` sidecar per database.
+
+```
+browser ──(tailnet only)──► pg-backup ──► Postgres 16 / 17 / 18, by service name
+                               │
+                               └─rclone─► s3://<bucket>/<folder>/<database>-<time>.dump
+```
+
+## What it does
+
+- **Databases.** Each database has a name, a host, port, database, user and
+  password, a cron schedule (UTC), retention in days and an S3 folder. You
+  add and edit them in the web page.
+- **Version.** Before each job the service reads `server_version_num` and
+  uses the client of the same major from `/usr/libexec/postgresql<major>/`.
+  The image has the 16, 17 and 18 clients. If the same major is missing, it
+  uses the nearest newer one.
+- **Backup.** `pg_dump -Fc`, then `pg_restore --list` as an integrity
+  check, then upload. Pruning deletes only that database's own
+  `<database>-*.dump` files older than its retention.
+- **Verify.** Restores the newest dump into `<database>_verify_<time>`,
+  counts its tables, then drops it.
+- **Restore as copy.** Restores a chosen dump into a new database
+  `<database>_restore_<time>`. The live database stays as it is. The
+  copy stays until you drop it.
+- **Replace live.** You must type the database name. The service takes a
+  fresh backup first. Then it runs `pg_restore --clean --if-exists
+  --single-transaction`, so a failure changes nothing. The run page names
+  the safety backup to undo with.
+- **Jobs.** One job per database at a time and at most `MAX_PARALLEL` jobs
+  in total. Each run keeps its log. Each database keeps its last 30 runs.
+- **Failures.** Each failure is written to the container log as
+  `job failed: target=<name> kind=<kind>`. It also goes to Discord when
+  `DISCORD_WEBHOOK_URL` is set.
+
+## Where data lives
+
+| What | Where |
+|---|---|
+| Databases, passwords, run history | `$DATA_DIR/state.json`, mode 0600 |
+| Tailscale node identity | `$DATA_DIR/tailscale/` |
+| Dumps | S3 only. Local temp files go to `$WORKDIR` and are deleted after each job. |
+
+`DATA_DIR` must be a persistent volume. If you lose it, you must add the
+databases again. The dumps in S3 are not affected.
+
+## Login
+
+The service joins the tailnet itself with
+[tsnet](https://tailscale.com/kb/1244/tsnet). It has no public port,
+no DNS record and no Traefik route. For each request it asks Tailscale
+who the sender is (`WhoIs`). That Tailscale login is the user. Logins that
+are not in `ALLOWED_USERS` get 403. The service refuses cross-site POSTs.
+
+On first start, set `TS_AUTHKEY`. If you do not, the log prints a
+login URL. Open it once. The node state then persists in
+`$DATA_DIR/tailscale`.
+
+## Configuration
+
+| Env | Default | Meaning |
+|---|---|---|
+| `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | required | One bucket for every database |
+| `S3_REGION` / `S3_PROVIDER` / `S3_FORCE_PATH_STYLE` | `us-east-1` / `Other` / `true` | rclone S3 settings |
+| `ALLOWED_USERS` | required | Comma list of Tailscale logins |
+| `TS_AUTHKEY` | — | Needed on first start only |
+| `TS_HOSTNAME` | `pg-backup` | URL is `https://<name>.<tailnet>.ts.net` |
+| `TS_HTTPS` | `true` | Needs HTTPS turned on for the tailnet. `false` serves HTTP on the tailnet. |
+| `DISCORD_WEBHOOK_URL` | — | Post failed jobs |
+| `MAX_PARALLEL` | `2` | Jobs that may run at the same time |
+| `DATA_DIR` / `WORKDIR` | `/data` / `/tmp/pg-backup` | State and temp dumps |
+| `DEV_NO_AUTH` | — | `1` serves plain HTTP on `LISTEN_ADDR` with no login. Local dev only. |
+
+The Postgres role needs `CREATEDB` for verify and restore as copy.
+
+## Develop
+
+```bash
+cd app
+docker compose up -d --build   # Postgres 16/17/18, an S3 stand-in, the app on :8091
+test/e2e.sh                    # full end-to-end run in its own stack, then teardown
+go test ./...                  # unit tests
+```
+
+The human acceptance flow is in [MANUAL_TESTING.md](MANUAL_TESTING.md).

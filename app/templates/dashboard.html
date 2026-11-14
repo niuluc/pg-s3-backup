@@ -1,0 +1,51 @@
+{{define "body"}}{{$d := .Data}}
+<div class="head">
+  <h1>Databases</h1>
+  <p class="summary">
+    {{len $d.Rows}} databases
+    {{with index $d.Counts "ok"}}<span><i class="dot ok"></i>{{.}} ok</span>{{end}}
+    {{with index $d.Counts "failed"}}<span><i class="dot failed"></i>{{.}} failing</span>{{end}}
+    {{with index $d.Counts "stale"}}<span><i class="dot stale"></i>{{.}} stale</span>{{end}}
+    {{with index $d.Counts "new"}}<span><i class="dot new"></i>{{.}} never backed up</span>{{end}}
+    {{with index $d.Counts "running"}}<span><i class="dot running"></i>{{.}} running</span>{{end}}
+  </p>
+  <a class="btn primary" href="/targets/new">Add database</a>
+</div>
+
+{{if not $d.Rows}}
+<p class="empty">No databases yet. Add one: a name, where Postgres is, and when to back it up.</p>
+{{else}}
+<table class="list">
+<thead><tr>
+  <th></th><th>Name</th><th>Database</th><th>Postgres</th><th>Schedule (UTC)</th><th>Last backup</th><th>Last verify</th><th></th>
+</tr></thead>
+<tbody>
+{{range $d.Rows}}
+<tr>
+  <td><i class="dot {{.Health}}" title="{{.Health}}"></i></td>
+  <td><a class="name" href="/targets/{{.T.ID}}">{{.T.Name}}</a></td>
+  <td class="mono small">{{.T.User}}@{{.T.Host}}:{{.T.Port}}/{{.T.Database}}</td>
+  <td>{{if .T.ServerVersion}}{{.T.ServerVersion}}{{else}}<span class="muted">unknown</span>{{end}}</td>
+  <td><span class="mono">{{.T.Schedule}}</span>
+      <div class="small muted">{{if .HasNext}}next {{until .Next}}{{else}}paused{{end}}</div></td>
+  <td>{{with .LastBackup}}
+        {{if eq .Status "ok"}}{{ago .Started}} <div class="small muted">{{bytes .Size}}</div>
+        {{else}}<a class="bad" href="/runs/{{.ID}}">failed {{ago .Started}}</a><div class="small muted clip" title="{{.Message}}">{{.Message}}</div>{{end}}
+      {{else}}<span class="muted">never</span>{{end}}</td>
+  <td>{{with .LastVerify}}
+        {{if eq .Status "ok"}}<span class="good">ok</span> {{ago .Started}}
+        {{else}}<a class="bad" href="/runs/{{.ID}}">failed</a> {{ago .Started}}{{end}}
+      {{else}}<span class="muted">never</span>{{end}}</td>
+  <td class="actions">
+    {{if .Running}}<span class="muted">running…</span>{{else}}
+    <form method="post" action="/targets/{{.T.ID}}/backup"><button class="btn">Back up now</button></form>
+    <form method="post" action="/targets/{{.T.ID}}/verify"><button class="btn quiet">Verify</button></form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+<p class="foot muted small">Clients installed: Postgres {{range $i, $c := $d.Clients}}{{if $i}}, {{end}}{{$c}}{{end}}. Each run picks the client that matches the server's major version.</p>
+{{end}}

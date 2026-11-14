@@ -1,0 +1,48 @@
+{{define "body"}}{{$t := .Data}}
+<div class="head"><h1>{{.Title}}</h1></div>
+<form class="form" method="post" action="{{if $t.ID}}/targets/{{$t.ID}}{{else}}/targets{{end}}">
+  <fieldset>
+    <legend>App</legend>
+    <label>Name <input name="name" value="{{$t.Name}}" required placeholder="umami" autofocus>
+      <span class="hint">Short name, no spaces. Also the default S3 folder.</span></label>
+  </fieldset>
+  <fieldset>
+    <legend>Postgres</legend>
+    <div class="row">
+      <label class="grow">Host <input name="host" value="{{$t.Host}}" required placeholder="utati-db-fkhxwe" class="mono">
+        <span class="hint">Service name on the shared network.</span></label>
+      <label class="narrow">Port <input name="port" value="{{$t.Port}}" inputmode="numeric" class="mono"></label>
+    </div>
+    <div class="row">
+      <label class="grow">Database <input name="database" value="{{$t.Database}}" required class="mono"></label>
+      <label class="grow">User <input name="user" value="{{$t.User}}" required class="mono"></label>
+    </div>
+    <label>Password <input name="password" type="password" autocomplete="new-password"
+      placeholder="{{if $t.ID}}unchanged{{end}}" {{if not $t.ID}}required{{end}}>
+      {{if $t.ID}}<span class="hint">Leave empty to keep the stored password.</span>{{end}}</label>
+    <p class="hint">The Postgres version is detected on save. You do not pick it.</p>
+  </fieldset>
+  <fieldset>
+    <legend>Schedule</legend>
+    <div class="row">
+      <label class="grow">When (cron, UTC) <input name="schedule" value="{{$t.Schedule}}" required class="mono">
+        <span class="hint"><code>0 3 * * *</code> daily 03:00 · <code>@every 6h</code> · <code>@hourly</code></span></label>
+      <label class="narrow">Keep days <input name="retention" value="{{$t.RetentionDays}}" inputmode="numeric"></label>
+    </div>
+    <label>S3 folder <input name="prefix" value="{{$t.Prefix}}" class="mono" placeholder="same as name">
+      <span class="hint">Files go to s3://{{.Bucket}}/&lt;folder&gt;/&lt;database&gt;-&lt;time&gt;.dump</span></label>
+    <label class="check"><input type="checkbox" name="enabled" {{if $t.Enabled}}checked{{end}}> Scheduled backups on</label>
+  </fieldset>
+  <div class="formactions">
+    <button class="btn primary">Save and test connection</button>
+    <a class="btn quiet" href="{{if $t.ID}}/targets/{{$t.ID}}{{else}}/{{end}}">Cancel</a>
+  </div>
+</form>
+{{if $t.ID}}
+<form class="danger" method="post" action="/targets/{{$t.ID}}/delete">
+  <h2>Remove this database</h2>
+  <p class="small">Stops its backups. Files already in S3 stay. Type <b>{{$t.Name}}</b> to confirm.</p>
+  <input name="confirm" autocomplete="off" class="mono"> <button class="btn bad">Remove</button>
+</form>
+{{end}}
+{{end}}
