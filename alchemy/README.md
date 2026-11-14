@@ -37,15 +37,40 @@ Every other value comes from Infisical (project `pg-backup`, environment
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `DISCORD_WEBHOOK_URL` | redacted |
 | `TS_AUTHKEY` | redacted, optional. Needed only for the first start. Remove it from Infisical afterwards; the next deploy drops the env var. |
 
+## Prerequisites
+
+1. **Tailscale.** Turn on MagicDNS and HTTPS Certificates for the tailnet in
+   the admin console. Without them tsnet exits with "you must enable HTTPS in
+   the admin panel".
+2. **First start only: `TS_AUTHKEY`.** Create a non-reusable,
+   non-ephemeral auth key and put it in Infisical as `TS_AUTHKEY`. Deploy.
+   After the node `pg-backup` joins:
+   1. In the Tailscale admin console, disable key expiry on the machine.
+   2. Delete `TS_AUTHKEY` from Infisical and deploy again. The next deploy
+      drops the env var.
+
+   The node identity lives in `/data/tailscale` on the `pg-backup-data`
+   volume, so later restarts and deploys need no key.
+3. **Infisical login** that points at the self-hosted instance (see below).
+
 ## Run
 
 From omarchy only:
 
 ```bash
 cd alchemy
-./deploy.sh plan     # preview
-./deploy.sh deploy   # apply
+./deploy.sh plan           # preview
+./deploy.sh deploy         # apply (asks for approval in a terminal)
+./deploy.sh drift          # compare live resources with state
 ```
+
+Extra args go to Alchemy after `--stage prod`. `--stage` and `--profile`
+are refused; set `ALCHEMY_PROFILE` to pick a profile.
+
+**Agents and `--yes`.** Alchemy shows no approval prompt in agent
+environments: `pi` on `PATH`, CI, or no TTY. There, an agent runs
+`./deploy.sh deploy --yes`, but only after a human said yes to that exact
+deploy, with the plan in front of them.
 
 Infisical must be the self-hosted instance, `https://secrets.kubaszwajka.com`.
 How the URL is chosen depends on the login:

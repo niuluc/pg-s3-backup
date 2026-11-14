@@ -9,7 +9,14 @@
 # state under <stack>/<stage>/, so stack names must differ.
 #
 #   ./deploy.sh plan
-#   ./deploy.sh deploy
+#   ./deploy.sh deploy [--yes]
+#   ./deploy.sh drift  [--yes]
+#
+# Extra args go to alchemy after `--stage prod`. Agents (pi on PATH, CI,
+# non-TTY) get no approval prompt, so they pass --yes, and only after a human
+# said yes to that exact deploy. --stage and --profile are refused: the stage is
+# always prod, and the profile comes from ALCHEMY_PROFILE so the Infisical URL
+# check below reads the same profile Alchemy uses.
 #
 # Secrets come from the self-hosted Infisical (project pg-backup, env prod).
 # Auth: an Alchemy profile with an Infisical machine identity
@@ -19,9 +26,18 @@ cd "$(dirname "$0")"
 
 action="${1:-}"
 case "$action" in
-  plan | deploy) ;;
-  *) echo "usage: $0 plan|deploy" >&2; exit 2 ;;
+  plan | deploy | drift) ;;
+  *) echo "usage: $0 plan|deploy|drift [alchemy flags, e.g. --yes]" >&2; exit 2 ;;
 esac
+shift
+for arg in "$@"; do
+  case "$arg" in
+    --stage | --stage=* | --profile | --profile=*)
+      echo "refusing: $arg; the stage is always prod and the profile comes from ALCHEMY_PROFILE" >&2
+      exit 2
+      ;;
+  esac
+done
 
 state_root="${HOME}/.local/share/alchemy/state"
 install -d -m 0700 "$state_root"
@@ -78,4 +94,4 @@ else
 fi
 
 [ -d node_modules ] || bun install --frozen-lockfile
-exec bunx alchemy "$action" --stage prod
+exec bunx alchemy "$action" --stage prod "$@"
