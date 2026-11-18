@@ -16,11 +16,25 @@ container_id=$(docker run -d --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust \
 port=$(docker port "$container_id" 5432/tcp)
 case "$port" in 127.0.0.1:*) ;; *) echo "Docker did not assign a loopback port: $port" >&2; exit 1 ;; esac
 printf 'Postgres container %s listening on %s\n' "$container_id" "$port"
-for _ in $(seq 1 60); do
-  docker exec "$container_id" pg_isready -U postgres >/dev/null 2>&1 && break
+readiness_deadline=$((SECONDS + 60))
+ready=false
+while (( SECONDS < readiness_deadline )); do
+  if timeout 2s docker exec "$container_id" env PGCONNECT_TIMEOUT=1 \
+    psql -h 127.0.0.1 -U postgres -d postgres -X -v ON_ERROR_STOP=1 -c 'select 1' \
+    >/dev/null 2>&1; then
+    ready=true
+    break
+  fi
   sleep 1
 done
-docker exec "$container_id" pg_isready -U postgres >/dev/null
+if [[ "$ready" != true ]]; then
+  echo 'Timed out waiting for PostgreSQL TCP query readiness after 60 seconds.' >&2
+  echo 'PostgreSQL container state:' >&2
+  docker inspect --format '{{.State.Status}} (running={{.State.Running}})' "$container_id" >&2 || true
+  echo 'Recent PostgreSQL container logs:' >&2
+  docker logs --tail 20 "$container_id" >&2 || true
+  exit 1
+fi
 psql() { docker exec -i "$container_id" psql -X -v ON_ERROR_STOP=1 -U postgres "$@"; }
 
 psql <<'SQL'
