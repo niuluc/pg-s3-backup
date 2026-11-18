@@ -1,19 +1,19 @@
 name: Publish image
 
-# Pull requests build for validation only; pushes to main publish to GHCR.
+# Main pushes and pull requests build for validation only. Publish on a v* tag
+# push, or on workflow_dispatch only when publish=true is selected.
 #
 # One image per Postgres client major. 17 is the default and owns the plain
 # tags (latest, sha-<short>, semver). 18 gets the same set with a -pg18
 # suffix, and its moving tag is `pg18`.
 #
 # Which tags each event pushes:
-#   push to main        sha-<short>, sha-<short>-pg18. Nothing else.
+#   push to main        builds both, pushes nothing.
 #   push of tag vX.Y.Z  X.Y.Z, X.Y, sha-<short> and latest (pg17),
 #                       X.Y.Z-pg18, X.Y-pg18, sha-<short>-pg18 and pg18 (pg18).
 #   pull_request        builds both, pushes nothing.
-#   workflow_dispatch   follows the ref it runs on: on main (or any branch)
-#                       like a main push, sha tags only; on a vX.Y.Z tag
-#                       like that tag push.
+#   workflow_dispatch   builds both by default; publish=true opts in to push.
+#                       Without the opt-in, no ref (including a version tag) pushes.
 # So `latest` and `pg18` move only when a release tag is pushed by hand.
 # A tag with a pre-release part (v1.2.0-rc.1) gets its own tags but does not
 # move `latest` or `pg18`.
@@ -25,6 +25,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the image for this ref
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: publish-image-${{ github.ref }}
@@ -79,9 +85,9 @@ jobs:
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Only authenticate when we actually push (PRs from forks have no secrets).
+      # Only authenticate when this event is allowed to publish.
       - name: Log in to GHCR
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -102,7 +108,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           build-args: PG_MAJOR=${{ matrix.pg_major }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |
             ${{ steps.meta.outputs.labels }}

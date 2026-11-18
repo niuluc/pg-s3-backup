@@ -143,10 +143,11 @@ docker exec -it "$c" pg-s3-backup restore latest         # DESTRUCTIVE (prompts)
 ## Image
 
 Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
-for `linux/amd64` and `linux/arm64`. A push to `main` publishes only the
-immutable `sha-<short>` and `sha-<short>-pg18` tags. A release tag `vX.Y.Z`
-publishes the version tags and moves `latest` and `pg18`. Pull requests build
-for validation only. See [Releasing this image](#releasing-this-image).
+for `linux/amd64` and `linux/arm64`. Pushes to `main` and pull requests build
+both images for validation without publishing. A release tag `vX.Y.Z`
+publishes the version tags and moves `latest` and `pg18`. A manual
+`workflow_dispatch` run also builds without publishing unless its `publish`
+input is set to `true`. See [Releasing this image](#releasing-this-image).
 
 The `pg_dump`/`pg_restore` major version must be `>=` the server it dumps. Pick
 the tag that matches your server:
@@ -168,7 +169,8 @@ docker build --build-arg PG_MAJOR=18 -t pg-s3-backup:pg18 .
 ## Releasing this image
 
 `latest` and `pg18` move only when someone pushes a release tag. A merge to
-`main` never moves them.
+`main` validates both images but does not publish them. Manual workflow runs do
+not publish unless the `publish` input is explicitly set to `true`.
 
 Cut a release from an up to date `main`:
 

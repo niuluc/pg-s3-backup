@@ -3,10 +3,11 @@ name: pg-backup app
 # The multi-database backup service in app/. Separate image from the
 # sidecar: ghcr.io/<owner>/pg-backup.
 #
-#   pull_request        go vet, go test, e2e against Postgres 16/17/18; builds, pushes nothing
-#   push to main        same checks, then pushes sha-<short>
-#   push of tag app-vX.Y.Z  pushes X.Y.Z
-#   workflow_dispatch   like a push on the ref it runs on
+#   pull_request        go vet, go test, e2e against Postgres 16/17/18; no publish
+#   push to main        same checks; publish job skips
+#   push of tag app-vX.Y.Z  publishes X.Y.Z and sha-<short>
+#   workflow_dispatch   tests by default; publish=true opts in to publish
+#                       (without opt-in, no ref including a tag publishes)
 # No moving tag: the Dokploy app pins an exact tag.
 
 on:
@@ -18,6 +19,12 @@ on:
     branches: [main]
     paths: ["app/**", ".github/workflows/app.yml"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the image for this ref
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: app-${{ github.ref }}
@@ -46,7 +53,7 @@ jobs:
 
   publish:
     needs: test
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,6 +62,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
+        if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -71,7 +79,7 @@ jobs:
         with:
           context: app
           platforms: linux/amd64
-          push: true
+          push: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
           build-args: VERSION=${{ steps.meta.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: |

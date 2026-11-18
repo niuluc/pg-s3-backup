@@ -92,6 +92,13 @@ A failed restore-as-copy or manual `pg_restore` can leave partial objects becaus
 
 From the repository root, run `tests/acl-flags.sh` and `tests/acl-restore-drill.sh` to check command flags and a local Docker restore.
 
+## Container image
+
+The app image is `ghcr.io/<owner>/pg-backup`. Pull requests and pushes to
+`main` run checks without publishing. A push of an `app-vX.Y.Z` tag publishes
+the versioned image. A manual workflow run does not publish unless its
+`publish` input is explicitly set to `true`.
+
 ## Develop
 
 ```bash
