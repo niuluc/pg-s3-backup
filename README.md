@@ -51,6 +51,18 @@ Dokploy setup hits that bug; this sidesteps it.
 `verify` is the safe way to prove a backup is restorable — it never touches the
 live database. A backup you have never restored is not a backup.
 
+### Restore database grants
+
+Custom-format dumps include schema, table, sequence and default-privilege ACLs. The dump command keeps `--no-owner`, and restore commands use it too. This skips ownership changes but does not remove source-role references from archived default ACLs.
+
+PostgreSQL roles are cluster-wide. `pg_dump` does not create them. Before restore, create every role named by an archived grant, including each source owner after `FOR ROLE`. The restore authority must be a superuser or a member of every referenced source role to apply its default privileges. Owning restored objects or owning the database is not enough. Missing grant roles cause restore and verify to fail.
+
+With `--no-owner`, the effective restore role owns new objects. Default privileges apply only to future objects created by the role named in each entry. Make the role that will create future tables and sequences match the default-privilege entries, or set the required defaults for that creator.
+
+Restore is not transactional and may leave partial objects behind after a failure. Fix missing roles or permissions, then retry into a fresh scratch database. Dumps made with `--no-acl` cannot restore omitted grants. For those dumps, use `pg_restore --no-acl` only as an explicit recovery choice, then reapply app-specific schema, table, sequence and default privileges. Check runtime `SELECT` and `INSERT` access, sequence access, and defaults for future objects.
+
+From the repository root, run `tests/acl-flags.sh` for command regressions and `tests/acl-restore-drill.sh` for a local Docker restore test. The drill uses a throwaway `postgres:17-alpine` container on a Docker-assigned loopback port.
+
 ## Configuration (environment)
 
 **Required**
@@ -131,10 +143,13 @@ docker exec -it "$c" pg-s3-backup restore latest         # DESTRUCTIVE (prompts)
 ## Image
 
 Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
-for `linux/amd64` and `linux/arm64`. A push to `main` publishes only the
-immutable `sha-<short>` and `sha-<short>-pg18` tags. A release tag `vX.Y.Z`
-publishes the version tags and moves `latest` and `pg18`. Pull requests build
-for validation only. See [Releasing this image](#releasing-this-image).
+for `linux/amd64` and `linux/arm64`. Pushes to `main` and pull requests build
+both images for validation without publishing. A release tag `vX.Y.Z`
+publishes the version tags and moves `latest` and `pg18`. A manual
+`workflow_dispatch` run builds without publishing unless its `publish`
+input is set to `true`. With that opt-in, a dispatch targeting an existing
+stable `vX.Y.Z` tag also publishes and moves `latest` and `pg18`. See
+[Releasing this image](#releasing-this-image).
 
 The `pg_dump`/`pg_restore` major version must be `>=` the server it dumps. Pick
 the tag that matches your server:
@@ -155,8 +170,12 @@ docker build --build-arg PG_MAJOR=18 -t pg-s3-backup:pg18 .
 
 ## Releasing this image
 
-`latest` and `pg18` move only when someone pushes a release tag. A merge to
-`main` never moves them.
+`latest` and `pg18` move when someone pushes a stable release tag, or runs
+`workflow_dispatch` with `publish=true` against an existing stable `vX.Y.Z`
+tag. The dispatch opt-in can publish the selected tag's images and move both
+tags. A merge to `main` validates both images but does not publish them. Manual
+workflow runs do not publish unless the `publish` input is explicitly set to
+`true`.
 
 Cut a release from an up to date `main`:
 

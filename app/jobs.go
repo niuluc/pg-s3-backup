@@ -340,7 +340,7 @@ func (j *job) dumpAndUpload(ctx context.Context) (string, error) {
 	defer os.Remove(tmp)
 
 	j.logf("dumping %s", j.t.Database)
-	args := append([]string{"-Fc", "--no-acl", "--no-owner", "-f", tmp}, j.connArgs(j.t.Database)...)
+	args := append([]string{"-Fc", "--no-owner", "-f", tmp}, j.connArgs(j.t.Database)...)
 	if _, err := j.exec(ctx, pgDump, args...); err != nil {
 		return "", err
 	}
@@ -422,7 +422,7 @@ func (j *job) restoreCopy(file string) error {
 		return err
 	}
 	j.logf("restoring %s into %s", file, copyDB)
-	args := append([]string{"--no-owner", "--no-acl", "--exit-on-error"}, j.connArgs(copyDB)...)
+	args := append([]string{"--no-owner", "--exit-on-error"}, j.connArgs(copyDB)...)
 	if _, err := j.exec(ctx, pgRestore, append(args, tmp)...); err != nil {
 		return fmt.Errorf("%w (database %s is left for inspection)", err, copyDB)
 	}
@@ -484,7 +484,7 @@ func (j *job) restoreReplace(file string) error {
 	}
 	j.logf("step 2/2: replacing %s with %s in one transaction (drop schemas: %s)", j.t.Database, file, strings.Join(strings.Fields(out), ", "))
 	if err := j.replaceStream(ctx,
-		[]string{pgRestore, "--no-owner", "--no-acl", "-f", "-", tmp},
+		[]string{pgRestore, "--no-owner", "--exit-on-error", "-f", "-", tmp},
 		append([]string{psql, "-X", "-q", "-v", "ON_ERROR_STOP=1", "-f", "-"}, j.connArgs(j.t.Database)...),
 		pre.String(),
 	); err != nil {
@@ -543,7 +543,7 @@ func (j *job) verify() error {
 	}()
 
 	j.logf("restoring into %s", scratch)
-	args := append([]string{"--no-owner", "--no-acl", "--exit-on-error"}, j.connArgs(scratch)...)
+	args := append([]string{"--no-owner", "--exit-on-error"}, j.connArgs(scratch)...)
 	if _, err := j.exec(ctx, pgRestore, append(args, tmp)...); err != nil {
 		return err
 	}
