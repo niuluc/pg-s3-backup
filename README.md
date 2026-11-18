@@ -53,12 +53,15 @@ live database. A backup you have never restored is not a backup.
 
 ### Restore database grants
 
-Custom-format dumps include schema, table, sequence and default-privilege ACLs.
-Restores use `--no-owner`, so they keep the restore user's ownership model but apply archived grants. PostgreSQL roles are cluster-wide and `pg_dump` does not create them. Create the required roles before restoring. The restore user must own restored objects or have enough rights to create objects and apply grants. Missing grant roles make restore and verify fail.
+Custom-format dumps include schema, table, sequence and default-privilege ACLs. The dump command keeps `--no-owner`, and restore commands use it too. This skips ownership changes but does not remove source-role references from archived default ACLs.
 
-Older dumps made with `--no-acl` do not contain grants. You cannot recover those grants from the dump. Restore with `pg_restore --no-acl` only as an explicit recovery choice, then reapply the required schema, table, sequence and default privileges from a separate grant script. Check application access after restore.
+PostgreSQL roles are cluster-wide. `pg_dump` does not create them. Before restore, create every role named by an archived grant, including each source owner after `FOR ROLE`. The restore authority must be a superuser or a member of every referenced source role to apply its default privileges. Owning restored objects or owning the database is not enough. Missing grant roles cause restore and verify to fail.
 
-Run `tests/acl-flags.sh` for command regressions and `tests/acl-restore-drill.sh` for a local Docker restore test. The drill uses a throwaway `postgres:17-alpine` container on a random loopback port.
+With `--no-owner`, the effective restore role owns new objects. Default privileges apply only to future objects created by the role named in each entry. Make the role that will create future tables and sequences match the default-privilege entries, or set the required defaults for that creator.
+
+Restore is not transactional and may leave partial objects behind after a failure. Fix missing roles or permissions, then retry into a fresh scratch database. Dumps made with `--no-acl` cannot restore omitted grants. For those dumps, use `pg_restore --no-acl` only as an explicit recovery choice, then reapply app-specific schema, table, sequence and default privileges. Check runtime `SELECT` and `INSERT` access, sequence access, and defaults for future objects.
+
+From the repository root, run `tests/acl-flags.sh` for command regressions and `tests/acl-restore-drill.sh` for a local Docker restore test. The drill uses a throwaway `postgres:17-alpine` container on a Docker-assigned loopback port.
 
 ## Configuration (environment)
 
