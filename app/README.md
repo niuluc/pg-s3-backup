@@ -88,7 +88,7 @@ PostgreSQL roles are cluster-wide, and `pg_dump` does not create them. Create ev
 
 With `--no-owner`, the effective restore role owns newly created objects. Default privileges affect only future objects created by the role named in each entry. Ensure the role that will create future tables and sequences has the required defaults.
 
-A failed restore can leave partial objects because restore is not transactional. Fix missing roles or permissions, then retry into a fresh scratch database. Legacy dumps made with `--no-acl` cannot regain omitted grants. For explicit recovery, restore with `pg_restore --no-acl`, then apply schema, table, sequence and default-privilege grants. Check runtime `SELECT`, `INSERT` and sequence access, plus defaults for future tables and sequences.
+A failed restore-as-copy or manual `pg_restore` can leave partial objects because those restores are not transactional. Fix missing roles or permissions, then retry restore-as-copy into a fresh scratch database. Replace live runs in a transaction. Grant or SQL errors roll back the transaction, leaving no partial replacement. Legacy dumps made with `--no-acl` cannot regain omitted grants. For explicit recovery, restore with `pg_restore --no-acl`, then apply schema, table, sequence and default-privilege grants. Check runtime `SELECT`, `INSERT` and sequence access, plus defaults for future tables and sequences.
 
 From the repository root, run `tests/acl-flags.sh` and `tests/acl-restore-drill.sh` to check command flags and a local Docker restore.
 
