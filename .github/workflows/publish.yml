@@ -14,7 +14,8 @@ name: Publish image
 #   pull_request        builds both, pushes nothing.
 #   workflow_dispatch   builds both by default; publish=true opts in to push.
 #                       Without the opt-in, no ref (including a version tag) pushes.
-# So `latest` and `pg18` move only when a release tag is pushed by hand.
+# `latest` and `pg18` move on a stable v* tag push, or on a dispatch with
+# publish=true targeting an existing stable v* tag.
 # A tag with a pre-release part (v1.2.0-rc.1) gets its own tags but does not
 # move `latest` or `pg18`.
 

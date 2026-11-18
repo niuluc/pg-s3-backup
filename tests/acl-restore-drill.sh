@@ -79,6 +79,8 @@ docker exec "$container_id" dropdb -U postgres fixeddb
 docker exec "$container_id" createdb -U postgres fixeddb
 docker exec "$container_id" psql -U postgres -c 'CREATE ROLE grant_reader' >/dev/null
 docker exec "$container_id" pg_restore -U postgres -d fixeddb --no-owner --exit-on-error /tmp/fixed.dump
+psql -d fixeddb -tAc "SELECT has_table_privilege('grant_reader','app.items','SELECT') AND has_table_privilege('grant_reader','app.items','INSERT') AND has_sequence_privilege('grant_reader','app.items_id_seq','USAGE')" | grep -qx t
+psql -d fixeddb -c "SET ROLE grant_reader; INSERT INTO app.items(value) VALUES ('fixed-items') RETURNING id; SELECT value FROM app.items" | grep -q fixed-items
 psql -d fixeddb <<'SQL'
 ALTER SCHEMA app OWNER TO grant_owner;
 SET ROLE grant_owner;
@@ -97,6 +99,10 @@ GRANT USAGE, SELECT ON SEQUENCE app.items_id_seq TO grant_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE grant_owner IN SCHEMA app GRANT SELECT, INSERT ON TABLES TO grant_reader;
 ALTER DEFAULT PRIVILEGES FOR ROLE grant_owner IN SCHEMA app GRANT USAGE, SELECT ON SEQUENCES TO grant_reader;
 ALTER SCHEMA app OWNER TO grant_owner;
+SQL
+psql -d recoverdb -tAc "SELECT has_table_privilege('grant_reader','app.items','SELECT') AND has_table_privilege('grant_reader','app.items','INSERT') AND has_sequence_privilege('grant_reader','app.items_id_seq','USAGE')" | grep -qx t
+psql -d recoverdb -c "SET ROLE grant_reader; INSERT INTO app.items(value) VALUES ('recovery-items') RETURNING id; SELECT value FROM app.items" | grep -q recovery-items
+psql -d recoverdb <<'SQL'
 SET ROLE grant_owner;
 CREATE TABLE app.future_after_recovery (id serial PRIMARY KEY, value text);
 RESET ROLE;

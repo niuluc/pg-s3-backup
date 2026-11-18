@@ -146,8 +146,10 @@ Published by `.github/workflows/publish.yml` to `ghcr.io/niuluc/pg-s3-backup`
 for `linux/amd64` and `linux/arm64`. Pushes to `main` and pull requests build
 both images for validation without publishing. A release tag `vX.Y.Z`
 publishes the version tags and moves `latest` and `pg18`. A manual
-`workflow_dispatch` run also builds without publishing unless its `publish`
-input is set to `true`. See [Releasing this image](#releasing-this-image).
+`workflow_dispatch` run builds without publishing unless its `publish`
+input is set to `true`. With that opt-in, a dispatch targeting an existing
+stable `vX.Y.Z` tag also publishes and moves `latest` and `pg18`. See
+[Releasing this image](#releasing-this-image).
 
 The `pg_dump`/`pg_restore` major version must be `>=` the server it dumps. Pick
 the tag that matches your server:
@@ -168,9 +170,12 @@ docker build --build-arg PG_MAJOR=18 -t pg-s3-backup:pg18 .
 
 ## Releasing this image
 
-`latest` and `pg18` move only when someone pushes a release tag. A merge to
-`main` validates both images but does not publish them. Manual workflow runs do
-not publish unless the `publish` input is explicitly set to `true`.
+`latest` and `pg18` move when someone pushes a stable release tag, or runs
+`workflow_dispatch` with `publish=true` against an existing stable `vX.Y.Z`
+tag. The dispatch opt-in can publish the selected tag's images and move both
+tags. A merge to `main` validates both images but does not publish them. Manual
+workflow runs do not publish unless the `publish` input is explicitly set to
+`true`.
 
 Cut a release from an up to date `main`:
 
