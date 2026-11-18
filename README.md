@@ -51,6 +51,15 @@ Dokploy setup hits that bug; this sidesteps it.
 `verify` is the safe way to prove a backup is restorable — it never touches the
 live database. A backup you have never restored is not a backup.
 
+### Restore database grants
+
+Custom-format dumps include schema, table, sequence and default-privilege ACLs.
+Restores use `--no-owner`, so they keep the restore user's ownership model but apply archived grants. PostgreSQL roles are cluster-wide and `pg_dump` does not create them. Create the required roles before restoring. The restore user must own restored objects or have enough rights to create objects and apply grants. Missing grant roles make restore and verify fail.
+
+Older dumps made with `--no-acl` do not contain grants. You cannot recover those grants from the dump. Restore with `pg_restore --no-acl` only as an explicit recovery choice, then reapply the required schema, table, sequence and default privileges from a separate grant script. Check application access after restore.
+
+Run `tests/acl-flags.sh` for command regressions and `tests/acl-restore-drill.sh` for a local Docker restore test. The drill uses a throwaway `postgres:17-alpine` container on a random loopback port.
+
 ## Configuration (environment)
 
 **Required**

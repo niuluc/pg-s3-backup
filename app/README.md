@@ -80,6 +80,14 @@ login URL. Open it once. The node state then persists in
 
 The Postgres role needs `CREATEDB` for verify and restore as copy.
 
+## Restore database grants
+
+Dumps include schema, table, sequence and default-privilege ACLs. Restore paths keep `--no-owner` and apply archived grants. PostgreSQL roles are cluster-wide, and `pg_dump` does not create them. Create every grantee role before restore. The restore user must own restored objects or have enough rights to create objects and apply grants. Restore and verify fail when a grant names a missing role.
+
+Legacy dumps made with `--no-acl` cannot regain the omitted grants. For explicit recovery, restore with `pg_restore --no-acl`, then apply a separate grant script. Include schema, table, sequence and default-privilege grants. Check application access after restore.
+
+Run `../tests/acl-flags.sh` and `../tests/acl-restore-drill.sh` from this directory's parent to check command flags and a local Docker restore.
+
 ## Develop
 
 ```bash

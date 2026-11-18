@@ -80,7 +80,7 @@ cmd_backup() {
 
   log "dumping ${PGDATABASE} from ${PGHOST}:${PGPORT}"
   pg_dump -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" \
-    -Fc --no-acl --no-owner -f "${tmp}"
+    -Fc --no-owner -f "${tmp}"
 
   # Integrity gate: a dump that pg_restore can't read is not a backup.
   pg_restore --list "${tmp}" >/dev/null || die "dump failed integrity check"
@@ -126,7 +126,7 @@ cmd_restore() {
 
   log "restoring into ${target} (drop + recreate objects)"
   pg_restore -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${target}" \
-    --no-owner --no-acl --clean --if-exists "${tmp}"
+    --no-owner --exit-on-error --clean --if-exists "${tmp}"
   rm -f "${tmp}"
   log "restore complete: ${name} -> ${target}"
 }
@@ -152,7 +152,7 @@ cmd_verify() {
 
   log "restoring ${name} into ${scratch}"
   pg_restore -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${scratch}" \
-    --no-owner --no-acl "${tmp}"
+    --no-owner --exit-on-error "${tmp}"
 
   local tables
   tables="$(psql_conn -d "${scratch}" -tAc \
