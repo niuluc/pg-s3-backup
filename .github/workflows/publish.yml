@@ -47,7 +47,7 @@ permissions:
 jobs:
   publish:
     name: Build and publish (pg${{ matrix.pg_major }})
-    runs-on: ubuntu-latest
+    runs-on: boat
     strategy:
       # A failed 18 build must not cancel the 17 (latest) publish.
       fail-fast: false

@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: boat
     defaults:
       run:
         working-directory: app
@@ -54,7 +54,7 @@ jobs:
   publish:
     needs: test
     if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
-    runs-on: ubuntu-latest
+    runs-on: boat
     permissions:
       contents: read
       packages: write
