@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 
 // Image tag of ghcr.io/niuluc/pg-backup. A version bump is a commit here.
 // Published by app.yml when the tag app-v<VERSION> is pushed.
-const PG_BACKUP_VERSION = "0.1.0";
+const PG_BACKUP_VERSION = "0.2.0";
 const IMAGE = `ghcr.io/niuluc/pg-backup:${PG_BACKUP_VERSION}`;
 
 export default Alchemy.Stack(
