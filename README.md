@@ -15,7 +15,8 @@ demand.
 
 > **New:** [`app/`](app/README.md) holds `pg-backup`, one service with a web
 > page that backs up many databases. It is meant to replace one sidecar per
-> database.
+> database. The service can send failed-job alerts to Slack. See its
+> [configuration](app/README.md#configuration).
 
 ## Why it exists
 

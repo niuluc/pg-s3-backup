@@ -89,9 +89,7 @@ func main() {
 		}
 	}
 
-	if url := os.Getenv("DISCORD_WEBHOOK_URL"); url != "" {
-		runner.OnFailure = discordNotifier(url)
-	}
+	runner.OnFailure = slackNotifier(os.Getenv("SLACK_BOT_TOKEN"), os.Getenv("SLACK_CHANNEL"))
 
 	var ln net.Listener
 	if os.Getenv("DEV_NO_AUTH") != "1" {

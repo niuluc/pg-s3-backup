@@ -74,7 +74,8 @@ export default Alchemy.Stack(
         S3_BUCKET: yield* Config.String("S3_BUCKET"),
         S3_ACCESS_KEY_ID: yield* Config.Redacted("S3_ACCESS_KEY_ID"),
         S3_SECRET_ACCESS_KEY: yield* Config.Redacted("S3_SECRET_ACCESS_KEY"),
-        DISCORD_WEBHOOK_URL: yield* Config.Redacted("DISCORD_WEBHOOK_URL"),
+        SLACK_BOT_TOKEN: yield* Config.Redacted("SLACK_BOT_TOKEN"),
+        SLACK_CHANNEL: yield* Config.String("SLACK_CHANNEL"),
         ...(Option.isSome(tsAuthKey) ? { TS_AUTHKEY: tsAuthKey.value } : {}),
       },
       // Never two tasks at once: they would share one tsnet identity and one

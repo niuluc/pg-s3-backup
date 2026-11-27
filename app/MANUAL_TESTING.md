@@ -43,11 +43,21 @@ existing `pg-s3-backup` sidecars. Nothing is removed during this flow.
 
 ## 6. Failure shows
 
-1. Edit a database. Set a wrong password. Click **Back up now**.
+Use a disposable local test database for this check. Do not change a production
+password to test notifications. A live Slack message requires separate send approval.
+
+1. Configure `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` for an approved test channel,
+   then edit the test database. Set a wrong password. Click **Back up now**.
    - Expect: the run fails. On the main page the dot is red and the row
-     reads "failed". The Discord channel gets one message if a webhook is
-     set.
-2. Set the right password again.
+     reads "failed". The configured Slack channel gets one message with the
+     job kind, database name, trigger and error. Without both Slack settings,
+     no message is sent.
+2. Set the right password again and click **Back up now**.
+   - Expect: the run succeeds. No success or recovery message is sent.
+
+Run `go test -run TestSlackNotifier -v ./...` from `app/` to check request
+content, Slack API errors and safe logs against a local `httptest` server.
+This sends no live messages.
 
 Replace live is covered by `test/e2e.sh`. Try it in production only when
 you need it.

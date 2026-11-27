@@ -33,9 +33,18 @@ Every other value comes from Infisical (project `pg-backup`, environment
 
 | Name | Kind |
 |---|---|
-| `ALLOWED_USERS`, `S3_ENDPOINT`, `S3_BUCKET` | string |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `DISCORD_WEBHOOK_URL` | redacted |
+| `ALLOWED_USERS`, `S3_ENDPOINT`, `S3_BUCKET`, `SLACK_CHANNEL` | string |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `SLACK_BOT_TOKEN` | redacted |
 | `TS_AUTHKEY` | redacted, optional. Needed only for the first start. Remove it from Infisical afterwards; the next deploy drops the env var. |
+
+For the Slack rollout, add `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` to this
+Infisical project and remove `DISCORD_WEBHOOK_URL`. Use the channel ID for
+`#infra-alerts`. Install a bot with `chat:write` and invite it to the channel.
+
+Do not apply this environment change to the current image. The app image
+release waits for Kuba under INFRA-217, together with the database-grants fix.
+The rollout needs that approved image and both Slack settings in one update.
+This source change does not release an image or change the running service.
 
 ## Prerequisites
 

@@ -37,8 +37,9 @@ browser ──(tailnet only)──► pg-backup ──► Postgres 16 / 17 / 18,
 - **Jobs.** One job per database at a time and at most `MAX_PARALLEL` jobs
   in total. Each run keeps its log. Each database keeps its last 30 runs.
 - **Failures.** Each failure is written to the container log as
-  `job failed: target=<name> kind=<kind>`. It also goes to Discord when
-  `DISCORD_WEBHOOK_URL` is set.
+  `job failed: target=<name> kind=<kind>`. It also goes to Slack when
+  `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` are set. Successful jobs do not send
+  notifications, including the first success after a failure.
 
 ## Where data lives
 
@@ -73,12 +74,21 @@ login URL. Open it once. The node state then persists in
 | `TS_AUTHKEY` | — | Needed on first start only |
 | `TS_HOSTNAME` | `pg-backup` | URL is `https://<name>.<tailnet>.ts.net` |
 | `TS_HTTPS` | `true` | Needs HTTPS turned on for the tailnet. `false` serves HTTP on the tailnet. |
-| `DISCORD_WEBHOOK_URL` | — | Post failed jobs |
+| `SLACK_BOT_TOKEN` | optional | Slack bot token with `chat:write`; requires `SLACK_CHANNEL` |
+| `SLACK_CHANNEL` | optional | Slack channel ID, not a channel name; requires `SLACK_BOT_TOKEN` |
 | `MAX_PARALLEL` | `2` | Jobs that may run at the same time |
 | `DATA_DIR` / `WORKDIR` | `/data` / `/tmp/pg-backup` | State and temp dumps |
 | `DEV_NO_AUTH` | — | `1` serves plain HTTP on `LISTEN_ADDR` with no login. Local dev only. `LISTEN_ADDR` must be loopback unless `DEV_NO_AUTH_ANY_ADDR=1` (for a container whose port is published on 127.0.0.1). |
 
 The Postgres role needs `CREATEDB` for verify and restore as copy.
+
+For Slack alerts, install a bot with `chat:write` and invite it to the target
+channel. Set `SLACK_CHANNEL` to the channel ID for `#infra-alerts`, not the name.
+Alerts are disabled when either Slack setting is empty. Each failed job sends
+one `chat.postMessage` request, with a 10-second timeout and no retries.
+HTTP errors, invalid responses and Slack responses with `ok: false` are logged
+without the bot token or response body. Notification failure does not change
+the job result.
 
 ## Restore database grants
 
